@@ -24,7 +24,6 @@ public partial class AboutWindow
     public AboutWindow()
     {
         InitializeComponent();
-        // 使用 MVVM 绑定版本号
         DataContext = this;
         init();
     }
