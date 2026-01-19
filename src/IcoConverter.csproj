@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <None Remove="Assets\Fonts\MiSans-Normal.ttf" />
+    <None Remove="Assets\PNG\app.png" />
   </ItemGroup>
 
   <ItemGroup>
@@ -35,10 +36,7 @@
 
   <ItemGroup>
     <Resource Include="Assets\LICENSE\LICENSE" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Assets\PNG\" />
+    <Resource Include="Assets\PNG\app.png" />
   </ItemGroup>
 
 </Project>

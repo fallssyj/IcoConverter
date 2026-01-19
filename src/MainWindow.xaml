@@ -22,6 +22,7 @@
                     BorderThickness="0"
                     Command="{Binding ChangeThemeCommand}">
                     <Path
+                        Margin="1"
                         Data="{StaticResource Brightness6}"
                         Fill="{DynamicResource PrimaryTextBrush}"
                         Stretch="Uniform" />
@@ -31,6 +32,7 @@
                     BorderThickness="0"
                     Command="{Binding OpenGithubCommand}">
                     <Path
+                        Margin="1"
                         Data="{StaticResource Github}"
                         Fill="{DynamicResource PrimaryTextBrush}"
                         RenderTransformOrigin="0.5,0.5"
@@ -45,6 +47,7 @@
                     BorderThickness="0"
                     Command="{Binding OpenAboutCommand}">
                     <Path
+                        Margin="1"
                         Data="{StaticResource Info}"
                         Fill="{DynamicResource PrimaryTextBrush}"
                         RenderTransformOrigin="0.5,0.5"
@@ -99,6 +102,7 @@
                             Command="{Binding LoadImageCommand}">
                             <StackPanel Orientation="Horizontal">
                                 <Path
+                                    Width="20"
                                     Height="20"
                                     Data="{StaticResource File}"
                                     Fill="{DynamicResource PrimaryTextBrush}"
@@ -117,6 +121,7 @@
                             Command="{Binding ApplyCornerRadiusCommand}">
                             <StackPanel Orientation="Horizontal">
                                 <Path
+                                    Width="20"
                                     Height="20"
                                     Data="{StaticResource JournalCheck}"
                                     Fill="{DynamicResource PrimaryTextBrush}"
@@ -135,6 +140,7 @@
                             Command="{Binding ConvertToIcoCommand}">
                             <StackPanel Orientation="Horizontal">
                                 <Path
+                                    Width="20"
                                     Height="20"
                                     Data="{StaticResource FloppyDiskThin}"
                                     Fill="{DynamicResource PrimaryTextBrush}"
@@ -152,6 +158,7 @@
                             Command="{Binding BatchConvertCommand}">
                             <StackPanel Orientation="Horizontal">
                                 <Path
+                                    Width="20"
                                     Height="20"
                                     Data="{StaticResource FileDirectorySymlink}"
                                     Fill="{DynamicResource PrimaryTextBrush}"
@@ -169,6 +176,7 @@
                             Command="{Binding CancelCommand}">
                             <StackPanel Orientation="Horizontal">
                                 <Path
+                                    Width="20"
                                     Height="20"
                                     Data="{StaticResource JournalX}"
                                     Fill="{DynamicResource PrimaryTextBrush}"

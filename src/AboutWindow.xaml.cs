@@ -18,8 +18,7 @@ public partial class AboutWindow
         "Microsoft.Extensions.DependencyInjection",
         "System.Drawing.Common",
         "SkiaSharp",
-        "Svg.Skia",
-        "System.Drawing.Common"
+        "Svg.Skia"
     ];
     public string LicenseText { get; set; } = "";
     public AboutWindow()

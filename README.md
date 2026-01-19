@@ -81,4 +81,3 @@ dotnet run --project src/IcoConverter.csproj
 - System.Drawing.Common
 - SkiaSharp
 - Svg.Skia
-- System.Drawing.Common

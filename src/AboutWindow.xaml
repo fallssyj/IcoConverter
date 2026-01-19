@@ -7,17 +7,32 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     Title="{Binding _Title}"
     Width="520"
-    Height="420"
+    Height="450"
     ResizeMode="NoResize"
     WindowStartupLocation="CenterOwner"
     mc:Ignorable="d">
     <Border Padding="20">
         <StackPanel>
             <StackPanel Orientation="Horizontal">
-                <TextBlock FontSize="20" Text="IcoConverter" />
+                <Image
+                    Width="40"
+                    Height="40"
+                    Source="/Assets/PNG/app.png">
+                    <Image.Clip>
+                        <EllipseGeometry
+                            Center="20,20"
+                            RadiusX="20"
+                            RadiusY="20" />
+                    </Image.Clip>
+                </Image>
+                <TextBlock
+                    Margin="10,0,0,0"
+                    VerticalAlignment="Center"
+                    FontSize="20"
+                    Text="IcoConverter" />
             </StackPanel>
 
-            <TabControl Margin="0,8,0,0">
+            <TabControl Margin="0,20,0,0">
                 <TabItem Header="鸣谢">
                     <ListBox
                         Height="240"
