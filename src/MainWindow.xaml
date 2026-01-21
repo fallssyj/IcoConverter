@@ -321,8 +321,7 @@
                                 <ListBox
                                     MaxHeight="200"
                                     ItemsSource="{Binding AvailableResolutions}"
-                                    ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                    SelectionMode="Multiple">
+                                    ScrollViewer.VerticalScrollBarVisibility="Auto">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate DataType="models:IcoResolution">
                                             <CheckBox

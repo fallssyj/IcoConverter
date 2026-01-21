@@ -39,11 +39,14 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<IImageLoadService, ImageLoadService>();
         services.AddSingleton<IBatchConversionService, BatchConversionService>();
+        services.AddSingleton<IIcoPngConversionService, IcoPngConversionService>();
 
         // 注册ViewModels
         services.AddSingleton<MainViewModel>();
+        services.AddTransient<IcoToPngViewModel>();
 
         // 注册Views
         services.AddSingleton<MainWindow>();
+        services.AddTransient<IcoToPngWindow>();
     }
 }

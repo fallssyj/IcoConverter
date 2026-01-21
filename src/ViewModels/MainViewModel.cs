@@ -6,6 +6,8 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using WinForms = System.Windows.Forms;
+using IcoConverter;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace IcoConverter.ViewModels
 {
@@ -381,7 +383,7 @@ namespace IcoConverter.ViewModels
             {
                 var dialog = new Microsoft.Win32.OpenFileDialog
                 {
-                    Filter = "图片文件|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.svg|所有文件|*.*",
+                    Filter = "图片文件|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.svg;*.ico|所有文件|*.*",
                     Title = "选择图片"
                 };
 
@@ -637,6 +639,12 @@ namespace IcoConverter.ViewModels
             bool startedApply = false;
             try
             {
+                if (IsIcoFile(filePath))
+                {
+                    OpenIcoToPngWindow(filePath);
+                    return;
+                }
+
                 IsProcessing = true;
                 AddLog($"处理图片: {filePath}");
 
@@ -713,6 +721,13 @@ namespace IcoConverter.ViewModels
         {
             if (files == null || files.Length == 0) return;
 
+            var icoFile = files.FirstOrDefault(IsIcoFile);
+            if (!string.IsNullOrEmpty(icoFile))
+            {
+                OpenIcoToPngWindow(icoFile);
+                return;
+            }
+
             // 过滤出支持的图片文件（含 SVG）
             var imageFiles = files.Where(_imageLoadService.IsSupportedImageFile).ToArray();
 
@@ -726,6 +741,29 @@ namespace IcoConverter.ViewModels
                 CustomMessageBox.Show("拖放的文件不是支持的图片格式。",
                     "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
+        }
+
+        /// <summary>
+        /// 判断是否为 ICO 文件。
+        /// </summary>
+        private static bool IsIcoFile(string filePath)
+        {
+            return string.Equals(System.IO.Path.GetExtension(filePath), ".ico", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 打开 ICO 转 PNG 的转换弹窗。
+        /// </summary>
+        private void OpenIcoToPngWindow(string icoPath)
+        {
+            // 使用异步调度，避免在拖放回调中阻塞 UI 线程导致拖放状态无法释放。
+            System.Windows.Application.Current.Dispatcher.BeginInvoke(() =>
+            {
+                var window = App.ServiceProvider.GetRequiredService<IcoToPngWindow>();
+                window.Initialize(icoPath);
+                window.Owner = GetAssociatedWindow();
+                window.ShowDialog();
+            }, System.Windows.Threading.DispatcherPriority.Background);
         }
 
         private void AddLog(string message)

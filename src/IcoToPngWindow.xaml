@@ -1,0 +1,133 @@
+<hc:Window
+    x:Class="IcoConverter.IcoToPngWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:hc="https://handyorg.github.io/handycontrol"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:models="clr-namespace:IcoConverter.Models"
+    Title="ICO 转 PNG"
+    Width="600"
+    Height="530"
+    ResizeMode="NoResize"
+    WindowStartupLocation="CenterOwner"
+    mc:Ignorable="d">
+    <Border Padding="20">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Margin="0,0,0,12">
+                <TextBlock
+                    FontSize="16"
+                    FontWeight="SemiBold"
+                    Text="ICO 转 PNG" />
+                <TextBlock
+                    Margin="0,6,0,0"
+                    Foreground="{DynamicResource SecondaryTextBrush}"
+                    Text="请选择导出分辨率并设置输出路径。" />
+            </StackPanel>
+
+            <Grid Grid.Row="1" Margin="0,0,0,12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock
+                    Grid.Row="0"
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    Text="ICO 路径:" />
+                <TextBox
+                    Grid.Row="0"
+                    Grid.Column="1"
+                    Margin="8,0"
+                    IsReadOnly="True"
+                    Text="{Binding IcoPath, Mode=OneWay}" />
+
+                <TextBlock
+                    Grid.Row="1"
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    Text="输出路径:" />
+                <TextBox
+                    Grid.Row="1"
+                    Grid.Column="1"
+                    Margin="8,0"
+                    Text="{Binding OutputPath, UpdateSourceTrigger=PropertyChanged}" />
+                <Button
+                    Grid.Row="1"
+                    Grid.Column="2"
+                    Width="80"
+                    Margin="6,0,0,0"
+                    Command="{Binding BrowseOutputCommand}"
+                    Content="浏览" />
+            </Grid>
+
+            <Border Grid.Row="2" Padding="12">
+                <StackPanel>
+                    <TextBlock Margin="0,0,0,8" Text="ICO 包含的分辨率" />
+                    <ListBox
+                        MaxHeight="200"
+                        ItemsSource="{Binding Resolutions}"
+                        ScrollViewer.VerticalScrollBarVisibility="Auto">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="models:IcoResolution">
+                                <CheckBox
+                                    Margin="2"
+                                    Content="{Binding DisplayText}"
+                                    IsChecked="{Binding IsSelected}" />
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <WrapPanel Margin="0,10,0,0" HorizontalAlignment="Center">
+                        <Button
+                            Width="80"
+                            Margin="0,0,10,0"
+                            Command="{Binding SelectAllCommand}"
+                            Content="全选" />
+                        <Button
+                            Width="80"
+                            Command="{Binding ClearAllCommand}"
+                            Content="清空" />
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <Grid Grid.Row="3" Margin="0,12,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    Foreground="{DynamicResource SecondaryTextBrush}"
+                    Text="{Binding StatusMessage}" />
+                <Button
+                    Grid.Column="1"
+                    Width="90"
+                    Margin="0,0,10,0"
+                    Command="{Binding ConvertCommand}"
+                    Content="导出" />
+                <Button
+                    Grid.Column="2"
+                    Width="90"
+                    Command="{Binding CloseCommand}"
+                    Content="取消" />
+            </Grid>
+        </Grid>
+    </Border>
+</hc:Window>
