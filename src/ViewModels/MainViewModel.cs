@@ -697,6 +697,8 @@ namespace IcoConverter.ViewModels
             bool startedApply = false;
             try
             {
+                filePath = ShortcutResolver.ResolveShortcutTarget(filePath);
+
                 if (IsExecutableFile(filePath))
                 {
                     ExtractExecutableIcon(filePath);
@@ -785,14 +787,24 @@ namespace IcoConverter.ViewModels
         {
             if (files == null || files.Length == 0) return;
 
-            var executableFile = files.FirstOrDefault(IsExecutableFile);
+            var resolvedFiles = files
+                .Where(f => !string.IsNullOrWhiteSpace(f))
+                .Select(ShortcutResolver.ResolveShortcutTarget)
+                .ToArray();
+
+            if (resolvedFiles.Length == 0)
+            {
+                return;
+            }
+
+            var executableFile = resolvedFiles.FirstOrDefault(IsExecutableFile);
             if (!string.IsNullOrEmpty(executableFile))
             {
                 ExtractExecutableIcon(executableFile);
                 return;
             }
 
-            var icoFile = files.FirstOrDefault(IsIcoFile);
+            var icoFile = resolvedFiles.FirstOrDefault(IsIcoFile);
             if (!string.IsNullOrEmpty(icoFile))
             {
                 OpenIcoToPngWindow(icoFile);
@@ -800,7 +812,7 @@ namespace IcoConverter.ViewModels
             }
 
             // 过滤出支持的图片文件（含 SVG）
-            var imageFiles = files.Where(_imageLoadService.IsSupportedImageFile).ToArray();
+            var imageFiles = resolvedFiles.Where(_imageLoadService.IsSupportedImageFile).ToArray();
 
             if (imageFiles.Length > 0)
             {
