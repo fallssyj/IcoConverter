@@ -38,4 +38,10 @@
     <Resource Include="Assets\PNG\app.png" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Assets\Updagee\Updagee.exe">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

@@ -14,6 +14,7 @@ $version = "1.0.$versionPatch"
 $projectPath = Join-Path $PSScriptRoot "src\$appFolderName.csproj"
 $publishRoot = Join-Path $PSScriptRoot "src\bin\Release\publish"
 $versionPropsPath = Join-Path $PSScriptRoot "src\version.props"
+$updaterSourcePath = Join-Path $PSScriptRoot "src\Assets\Updagee\Updagee.exe"
 
 
 function Publish-AndZip
@@ -26,6 +27,7 @@ function Publish-AndZip
 
 	$publishDir = Join-Path $publishRoot "win-$rid\$appFolderName"
 	$zipPath = Join-Path $publishRoot $zipName
+	$ridRoot = Join-Path $publishRoot "win-$rid"
 
 	Write-Host "[开始] 发布 $rid ($profile)" -ForegroundColor Cyan
 
@@ -34,15 +36,22 @@ function Publish-AndZip
 	Get-ChildItem -Path $publishDir -Filter "*.pdb" -File | Remove-Item -Force
 	Write-Host "[完成] 已清理 PDB: $publishDir" -ForegroundColor DarkGray
 
+	if (-not (Test-Path $updaterSourcePath))
+    {
+        throw "找不到更新程序: $updaterSourcePath"
+    }
+
+    Copy-Item $updaterSourcePath -Destination $publishDir -Force
+    Write-Host "[完成] 已复制更新程序: $publishDir" -ForegroundColor DarkGray
+
 	if (Test-Path $zipPath)
 	{
 		Remove-Item $zipPath -Force
 	}
 
-	Compress-Archive -Path (Join-Path $publishDir "*") -DestinationPath $zipPath
+	Compress-Archive -Path (Join-Path $ridRoot "*") -DestinationPath $zipPath
 	Write-Host "[完成] 已生成压缩包: $zipPath" -ForegroundColor Green
 
-	$ridRoot = Join-Path $publishRoot "win-$rid"
 	if (Test-Path $ridRoot)
 	{
 		Remove-Item $ridRoot -Recurse -Force
@@ -51,6 +60,8 @@ function Publish-AndZip
 }
 
 Write-Host "开始执行打包脚本..." -ForegroundColor Cyan
+
+Write-Host "[版本号]: ($version)"
 @"
 <Project>
 	<PropertyGroup>
