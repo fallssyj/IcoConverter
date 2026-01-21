@@ -11,6 +11,24 @@
     ResizeMode="NoResize"
     WindowStartupLocation="CenterOwner"
     mc:Ignorable="d">
+    <hc:Window.NonClientAreaContent>
+        <Grid>
+            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                <Button
+                    Width="40"
+                    BorderThickness="0"
+                    Command="{Binding CheckUpdateCommand}"
+                    ToolTip="检查更新">
+                    <Path
+                        Margin="1"
+                        Data="{StaticResource ArrowBigUpDash}"
+                        Fill="{DynamicResource PrimaryTextBrush}"
+                        Stretch="Uniform" />
+                </Button>
+            </StackPanel>
+        </Grid>
+
+    </hc:Window.NonClientAreaContent>
     <Border Padding="20">
         <StackPanel>
             <StackPanel Orientation="Horizontal">

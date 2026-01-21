@@ -10,7 +10,6 @@
     <ApplicationIcon>Assets\ICO\app.ico</ApplicationIcon>
   </PropertyGroup>
 	
-  <!-- 如果存在，导入自动生成的 version.props 来注入版本信息 -->
   <Import Project="$(MSBuildProjectDirectory)\version.props" Condition="Exists('$(MSBuildProjectDirectory)\version.props')" />
 
   <ItemGroup>
