@@ -8,7 +8,7 @@
     xmlns:models="clr-namespace:IcoConverter.Models"
     Title="ICO 转 PNG"
     Width="600"
-    Height="530"
+    Height="540"
     ResizeMode="NoResize"
     WindowStartupLocation="CenterOwner"
     mc:Ignorable="d">
@@ -69,6 +69,7 @@
                     Grid.Row="1"
                     Grid.Column="2"
                     Width="80"
+                    Height="30"
                     Margin="6,0,0,0"
                     Command="{Binding BrowseOutputCommand}"
                     Content="浏览" />
@@ -93,11 +94,13 @@
                     <WrapPanel Margin="0,10,0,0" HorizontalAlignment="Center">
                         <Button
                             Width="80"
+                            Height="30"
                             Margin="0,0,10,0"
                             Command="{Binding SelectAllCommand}"
                             Content="全选" />
                         <Button
                             Width="80"
+                            Height="30"
                             Command="{Binding ClearAllCommand}"
                             Content="清空" />
                     </WrapPanel>
@@ -119,12 +122,14 @@
                 <Button
                     Grid.Column="1"
                     Width="90"
+                    Height="30"
                     Margin="0,0,10,0"
                     Command="{Binding ConvertCommand}"
                     Content="导出" />
                 <Button
                     Grid.Column="2"
                     Width="90"
+                    Height="30"
                     Command="{Binding CloseCommand}"
                     Content="取消" />
             </Grid>
