@@ -26,7 +26,7 @@
 - **圆角自定义**：0-1024px 可调圆角半径
 - **质量分级**：低/中/高三档圆角质量
 - **DPI 标准化**：自动统一图像 DPI（可调整）
-- **格式支持**：JPG、PNG、BMP、GIF、TIFF、SVG、ICO
+- **格式支持**：JPG、PNG、BMP、GIF、TIFF、SVG、ICO、EXE
 
 ## 🧰 开发环境
 
