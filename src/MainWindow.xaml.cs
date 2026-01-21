@@ -23,6 +23,7 @@ public partial class MainWindow
         // 设置拖放事件
         this.PreviewDragOver += MainWindow_PreviewDragOver;
         this.PreviewDrop += MainWindow_PreviewDrop;
+        this.PreviewDragLeave += MainWindow_PreviewDragLeave;
     }
     /// <summary>
     /// 处理窗口鼠标左键按下事件
@@ -64,6 +65,12 @@ public partial class MainWindow
             e.Handled = true;
         }
 
+        _viewModel.IsDropHintVisible = false;
+    }
+
+    private void MainWindow_PreviewDragLeave(object sender, System.Windows.DragEventArgs e)
+    {
+        // 用户拖拽离开窗口视为取消操作，隐藏拖放提示
         _viewModel.IsDropHintVisible = false;
     }
 
