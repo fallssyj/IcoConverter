@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Media.Imaging;
 
 namespace IcoConverter.Services
@@ -43,6 +45,85 @@ namespace IcoConverter.Services
             catch (Exception ex)
             {
                 throw new InvalidOperationException($"转换到ICO时出错: {ex.Message}", ex);
+            }
+        }
+
+        /// <summary>
+        /// 从给定的可执行文件中提取关联图标并保存成 ICO 文件。
+        /// </summary>
+        public async System.Threading.Tasks.Task ExtractIconFromExecutableAsync(string executablePath, string outputPath, System.Threading.CancellationToken cancellationToken = default)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(executablePath);
+            ArgumentException.ThrowIfNullOrEmpty(outputPath);
+
+            if (!File.Exists(executablePath))
+            {
+                throw new FileNotFoundException("未找到可执行文件", executablePath);
+            }
+
+            try
+            {
+                await System.Threading.Tasks.Task.Run(() =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var flags = NativeMethods.LoadLibraryFlags.LOAD_LIBRARY_AS_DATAFILE | NativeMethods.LoadLibraryFlags.LOAD_LIBRARY_AS_IMAGE_RESOURCE;
+                    var moduleHandle = NativeMethods.LoadLibraryEx(executablePath, IntPtr.Zero, flags);
+                    if (moduleHandle == IntPtr.Zero)
+                    {
+                        throw new Win32Exception(Marshal.GetLastWin32Error(), "无法加载可执行文件资源。");
+                    }
+
+                    try
+                    {
+                        var candidates = new List<(int Score, byte[] Data)>();
+                        bool enumerationResult = NativeMethods.EnumResourceNames(
+                            moduleHandle,
+                            new IntPtr(NativeMethods.RT_GROUP_ICON),
+                            (hModule, type, name, lParam) =>
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+
+                                var entries = IconResourceExtractor.ReadGroupEntries(hModule, type, name);
+                                var icoBytes = IconResourceExtractor.BuildIcoFromEntries(hModule, entries);
+                                var score = IconResourceExtractor.CalculateQualityScore(entries);
+
+                                candidates.Add((score, icoBytes));
+                                return true;
+                            },
+                            IntPtr.Zero);
+
+                        var enumerationError = Marshal.GetLastWin32Error();
+                        if (!enumerationResult && enumerationError != 0 && candidates.Count == 0)
+                        {
+                            throw new Win32Exception(enumerationError, "枚举图标资源失败。");
+                        }
+
+                        if (candidates.Count == 0)
+                        {
+                            throw new InvalidOperationException("未在可执行文件中找到图标资源。");
+                        }
+
+                        var bestCandidate = candidates
+                            .OrderByDescending(candidate => candidate.Score)
+                            .First();
+
+                        cancellationToken.ThrowIfCancellationRequested();
+                        File.WriteAllBytes(outputPath, bestCandidate.Data);
+                    }
+                    finally
+                    {
+                        NativeMethods.FreeLibrary(moduleHandle);
+                    }
+                }, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"提取可执行文件图标时出错: {ex.Message}", ex);
             }
         }
 
@@ -287,6 +368,198 @@ namespace IcoConverter.Services
             }
 
             return resized;
+        }
+
+        private static class IconResourceExtractor
+        {
+            internal static IReadOnlyList<GroupIconEntry> ReadGroupEntries(IntPtr moduleHandle, IntPtr resourceType, IntPtr resourceName)
+            {
+                var bytes = NativeMethods.LoadResourceData(moduleHandle, resourceType, resourceName);
+                using var ms = new MemoryStream(bytes);
+                using var reader = new BinaryReader(ms);
+
+                var reserved = reader.ReadUInt16();
+                var resourceTypeValue = reader.ReadUInt16();
+                var count = reader.ReadUInt16();
+
+                if (reserved != 0 || resourceTypeValue != 1)
+                {
+                    throw new InvalidOperationException("无效的图标组资源。");
+                }
+
+                var entries = new List<GroupIconEntry>(count);
+                for (int i = 0; i < count; i++)
+                {
+                    entries.Add(new GroupIconEntry(
+                        reader.ReadByte(),
+                        reader.ReadByte(),
+                        reader.ReadByte(),
+                        reader.ReadByte(),
+                        reader.ReadUInt16(),
+                        reader.ReadUInt16(),
+                        reader.ReadUInt32(),
+                        reader.ReadUInt16()));
+                }
+
+                return entries
+                    .OrderByDescending(e => NormalizeDimension(e.Width) * NormalizeDimension(e.Height))
+                    .ThenByDescending(e => e.BitCount)
+                    .ToArray();
+            }
+
+            internal static byte[] BuildIcoFromEntries(IntPtr moduleHandle, IReadOnlyList<GroupIconEntry> entries)
+            {
+                if (entries == null || entries.Count == 0)
+                {
+                    throw new InvalidOperationException("图标组为空。");
+                }
+
+                var iconData = new List<byte[]>(entries.Count);
+                foreach (var entry in entries)
+                {
+                    var data = NativeMethods.LoadResourceData(moduleHandle, new IntPtr(NativeMethods.RT_ICON), new IntPtr(entry.ResourceId));
+                    iconData.Add(data);
+                }
+
+                using var ms = new MemoryStream();
+                using var writer = new BinaryWriter(ms);
+
+                writer.Write((ushort)0);
+                writer.Write((ushort)1);
+                writer.Write((ushort)entries.Count);
+
+                int offset = 6 + entries.Count * 16;
+                for (int i = 0; i < entries.Count; i++)
+                {
+                    var entry = entries[i];
+                    var data = iconData[i];
+
+                    writer.Write(entry.Width);
+                    writer.Write(entry.Height);
+                    writer.Write(entry.ColorCount);
+                    writer.Write(entry.Reserved);
+                    writer.Write(entry.Planes);
+                    writer.Write(entry.BitCount);
+                    writer.Write(data.Length);
+                    writer.Write(offset);
+
+                    offset += data.Length;
+                }
+
+                foreach (var data in iconData)
+                {
+                    writer.Write(data);
+                }
+
+                writer.Flush();
+                return ms.ToArray();
+            }
+
+            internal static int CalculateQualityScore(IReadOnlyList<GroupIconEntry> entries)
+            {
+                if (entries == null || entries.Count == 0)
+                {
+                    return 0;
+                }
+
+                int maxArea = entries.Max(e => NormalizeDimension(e.Width) * NormalizeDimension(e.Height));
+                int maxBitDepth = entries.Max(e => e.BitCount);
+                return (maxArea * 1000) + maxBitDepth;
+            }
+
+            private static int NormalizeDimension(byte value) => value == 0 ? 256 : value;
+        }
+
+        private readonly struct GroupIconEntry
+        {
+            internal GroupIconEntry(byte width, byte height, byte colorCount, byte reserved, ushort planes, ushort bitCount, uint bytesInRes, ushort resourceId)
+            {
+                Width = width;
+                Height = height;
+                ColorCount = colorCount;
+                Reserved = reserved;
+                Planes = planes;
+                BitCount = bitCount;
+                BytesInRes = bytesInRes;
+                ResourceId = resourceId;
+            }
+
+            internal byte Width { get; }
+            internal byte Height { get; }
+            internal byte ColorCount { get; }
+            internal byte Reserved { get; }
+            internal ushort Planes { get; }
+            internal ushort BitCount { get; }
+            internal uint BytesInRes { get; }
+            internal ushort ResourceId { get; }
+        }
+
+        private static class NativeMethods
+        {
+            internal const int RT_ICON = 3;
+            internal const int RT_GROUP_ICON = 14;
+
+            [Flags]
+            internal enum LoadLibraryFlags : uint
+            {
+                LOAD_LIBRARY_AS_DATAFILE = 0x00000002,
+                LOAD_LIBRARY_AS_IMAGE_RESOURCE = 0x00000020
+            }
+
+            internal delegate bool EnumResNameProc(IntPtr hModule, IntPtr lpszType, IntPtr lpszName, IntPtr lParam);
+
+            [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+            internal static extern IntPtr LoadLibraryEx(string lpFileName, IntPtr hFile, LoadLibraryFlags dwFlags);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            internal static extern bool FreeLibrary(IntPtr hModule);
+
+            [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+            internal static extern bool EnumResourceNames(IntPtr hModule, IntPtr lpszType, EnumResNameProc lpEnumFunc, IntPtr lParam);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            internal static extern IntPtr FindResource(IntPtr hModule, IntPtr lpName, IntPtr lpType);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            internal static extern IntPtr LoadResource(IntPtr hModule, IntPtr hResInfo);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            internal static extern IntPtr LockResource(IntPtr hResData);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            internal static extern uint SizeofResource(IntPtr hModule, IntPtr hResInfo);
+
+            internal static byte[] LoadResourceData(IntPtr hModule, IntPtr lpType, IntPtr lpName)
+            {
+                var resourceInfo = FindResource(hModule, lpName, lpType);
+                if (resourceInfo == IntPtr.Zero)
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "无法定位资源。");
+                }
+
+                var size = SizeofResource(hModule, resourceInfo);
+                if (size == 0)
+                {
+                    throw new InvalidOperationException("资源大小为0。");
+                }
+
+                var resourceHandle = LoadResource(hModule, resourceInfo);
+                if (resourceHandle == IntPtr.Zero)
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "无法加载资源。");
+                }
+
+                var lockedResource = LockResource(resourceHandle);
+                if (lockedResource == IntPtr.Zero)
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "无法锁定资源。");
+                }
+
+                var length = checked((int)size);
+                var buffer = new byte[length];
+                Marshal.Copy(lockedResource, buffer, 0, length);
+                return buffer;
+            }
         }
     }
 }

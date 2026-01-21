@@ -395,8 +395,8 @@ namespace IcoConverter.ViewModels
             {
                 var dialog = new Microsoft.Win32.OpenFileDialog
                 {
-                    Filter = "图片文件|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.svg;*.ico|所有文件|*.*",
-                    Title = "选择图片"
+                    Filter = "图片或可执行文件|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.svg;*.ico;*.exe|所有文件|*.*",
+                    Title = "选择图片或可执行文件"
                 };
 
                 if (dialog.ShowDialog() == true)
@@ -697,6 +697,12 @@ namespace IcoConverter.ViewModels
             bool startedApply = false;
             try
             {
+                if (IsExecutableFile(filePath))
+                {
+                    ExtractExecutableIcon(filePath);
+                    return;
+                }
+
                 if (IsIcoFile(filePath))
                 {
                     OpenIcoToPngWindow(filePath);
@@ -779,6 +785,13 @@ namespace IcoConverter.ViewModels
         {
             if (files == null || files.Length == 0) return;
 
+            var executableFile = files.FirstOrDefault(IsExecutableFile);
+            if (!string.IsNullOrEmpty(executableFile))
+            {
+                ExtractExecutableIcon(executableFile);
+                return;
+            }
+
             var icoFile = files.FirstOrDefault(IsIcoFile);
             if (!string.IsNullOrEmpty(icoFile))
             {
@@ -807,6 +820,67 @@ namespace IcoConverter.ViewModels
         private static bool IsIcoFile(string filePath)
         {
             return string.Equals(System.IO.Path.GetExtension(filePath), ".ico", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 判断是否为可执行文件。
+        /// </summary>
+        private static bool IsExecutableFile(string filePath)
+        {
+            return string.Equals(System.IO.Path.GetExtension(filePath), ".exe", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 提取可执行文件的关联图标并提示保存。
+        /// </summary>
+        private async void ExtractExecutableIcon(string filePath)
+        {
+            try
+            {
+                AddLog($"检测到可执行文件: {filePath}");
+                var dialog = new Microsoft.Win32.SaveFileDialog
+                {
+                    Filter = "ICO 文件|*.ico",
+                    DefaultExt = ".ico",
+                    Title = "保存提取的图标",
+                    FileName = $"{Path.GetFileNameWithoutExtension(filePath)}.ico",
+                    OverwritePrompt = true
+                };
+
+                if (dialog.ShowDialog() != true)
+                {
+                    AddLog("已取消提取 EXE 图标。");
+                    return;
+                }
+
+                IsProcessing = true;
+                _cts = new System.Threading.CancellationTokenSource();
+
+                try
+                {
+                    await _icoConverterService.ExtractIconFromExecutableAsync(filePath, dialog.FileName, _cts.Token);
+                    AddLog($"成功提取 EXE 图标: {dialog.FileName}");
+                    CustomMessageBox.Show("图标提取完成并已保存。", "操作完成", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (OperationCanceledException)
+                {
+                    AddLog("提取 EXE 图标已取消。");
+                }
+                finally
+                {
+                    _cts?.Dispose();
+                    _cts = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"提取 EXE 图标时出错: {ex.Message}");
+                CustomMessageBox.Show($"无法提取 EXE 图标: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsProcessing = false;
+            }
         }
 
         /// <summary>
