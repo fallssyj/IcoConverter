@@ -94,10 +94,10 @@
                     <!--  图片控制按钮  -->
                     <WrapPanel
                         Grid.Row="0"
-                        Margin="0,0,0,10"
+                        Margin="0,0,0,5"
                         Orientation="Horizontal">
                         <Button
-                            Width="130"
+                            Width="110"
                             Height="40"
                             Command="{Binding LoadImageCommand}">
                             <StackPanel Orientation="Horizontal">
@@ -115,9 +115,9 @@
                         </Button>
 
                         <Button
-                            Width="130"
+                            Width="110"
                             Height="40"
-                            Margin="10,0,0,0"
+                            Margin="5,0,0,0"
                             Command="{Binding ApplyCornerRadiusCommand}">
                             <StackPanel Orientation="Horizontal">
                                 <Path
@@ -134,27 +134,45 @@
                         </Button>
 
                         <Button
-                            Width="130"
+                            Width="110"
                             Height="40"
-                            Margin="10,0,0,0"
+                            Margin="5,0,0,0"
                             Command="{Binding ConvertToIcoCommand}">
                             <StackPanel Orientation="Horizontal">
                                 <Path
                                     Width="20"
                                     Height="20"
-                                    Data="{StaticResource FloppyDiskThin}"
+                                    Data="{StaticResource FileDirectorySymlink}"
                                     Fill="{DynamicResource PrimaryTextBrush}"
                                     Stretch="Uniform" />
                                 <TextBlock
                                     Margin="5,0,0,0"
                                     VerticalAlignment="Center"
-                                    Text="转换到ICO" />
+                                    Text="导出ICO" />
                             </StackPanel>
                         </Button>
                         <Button
-                            Width="130"
+                            Width="110"
                             Height="40"
-                            Margin="10,0,0,0"
+                            Margin="5,0,0,0"
+                            Command="{Binding ExportPreviewToPngCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <Path
+                                    Width="20"
+                                    Height="20"
+                                    Data="{StaticResource FileDirectorySymlink}"
+                                    Fill="{DynamicResource PrimaryTextBrush}"
+                                    Stretch="Uniform" />
+                                <TextBlock
+                                    Margin="5,0,0,0"
+                                    VerticalAlignment="Center"
+                                    Text="导出PNG" />
+                            </StackPanel>
+                        </Button>
+                        <Button
+                            Width="110"
+                            Height="40"
+                            Margin="5,0,0,0"
                             Command="{Binding BatchConvertCommand}">
                             <StackPanel Orientation="Horizontal">
                                 <Path
@@ -170,9 +188,9 @@
                             </StackPanel>
                         </Button>
                         <Button
-                            Width="130"
+                            Width="110"
                             Height="40"
-                            Margin="10,0,0,0"
+                            Margin="5,0,0,0"
                             Command="{Binding CancelCommand}">
                             <StackPanel Orientation="Horizontal">
                                 <Path

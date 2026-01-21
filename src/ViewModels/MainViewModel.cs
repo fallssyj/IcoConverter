@@ -8,6 +8,8 @@ using System.Windows.Media.Imaging;
 using WinForms = System.Windows.Forms;
 using IcoConverter;
 using Microsoft.Extensions.DependencyInjection;
+using System.IO;
+using Microsoft.Win32;
 
 namespace IcoConverter.ViewModels
 {
@@ -95,6 +97,7 @@ namespace IcoConverter.ViewModels
             LoadImageCommand = new RelayCommand(LoadImage, CanLoadImage);
             ApplyCornerRadiusCommand = new AsyncRelayCommand(ApplyCornerRadiusAsync, CanApplyCornerRadius);
             ConvertToIcoCommand = new AsyncRelayCommand(ConvertToIcoAsync, CanConvertToIco);
+            ExportPreviewToPngCommand = new RelayCommand(ExportPreviewToPng, CanExportPreviewToPng);
             BatchConvertCommand = new AsyncRelayCommand(BatchConvertAsync, CanBatchConvert);
             CancelCommand = new RelayCommand(CancelProcessing, CanCancelProcessing);
             ClearLogCommand = new RelayCommand(ClearLog);
@@ -246,12 +249,21 @@ namespace IcoConverter.ViewModels
         public ICommand LoadImageCommand { get; }
         public ICommand ApplyCornerRadiusCommand { get; }
         public ICommand ConvertToIcoCommand { get; }
+        /// <summary>
+        /// 导出当前预览图像为 PNG 的命令。
+        /// </summary>
+        public ICommand ExportPreviewToPngCommand { get; }
         public ICommand BatchConvertCommand { get; }
         public ICommand CancelCommand { get; }
         public ICommand ClearLogCommand { get; }
         private bool CanApplyCornerRadius() => !IsProcessing && _originalImage != null;
 
         private bool CanLoadImage(object? parameter) => !IsProcessing;
+
+        /// <summary>
+        /// 判断是否可以导出当前预览图像。
+        /// </summary>
+        private bool CanExportPreviewToPng(object? parameter) => !IsProcessing && PreviewImage != null;
 
 
         /// <summary>
@@ -395,6 +407,52 @@ namespace IcoConverter.ViewModels
             catch (Exception ex)
             {
                 AddLog($"加载图片时出错: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 导出当前预览图像为 PNG 文件。
+        /// </summary>
+        private void ExportPreviewToPng(object? parameter)
+        {
+            if (PreviewImage == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var baseName = string.IsNullOrWhiteSpace(ImagePath)
+                    ? "preview"
+                    : Path.GetFileNameWithoutExtension(ImagePath);
+
+                var initialDirectory = string.IsNullOrWhiteSpace(ImagePath)
+                    ? Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+                    : Path.GetDirectoryName(ImagePath) ?? Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+
+                var dialog = new Microsoft.Win32.SaveFileDialog
+                {
+                    Filter = "PNG 图片|*.png",
+                    Title = "导出 PNG",
+                    FileName = $"{baseName}.png",
+                    InitialDirectory = initialDirectory,
+                    OverwritePrompt = true
+                };
+
+                if (dialog.ShowDialog() == true)
+                {
+                    using var stream = new System.IO.FileStream(dialog.FileName, System.IO.FileMode.Create, System.IO.FileAccess.Write);
+                    var encoder = new PngBitmapEncoder();
+                    encoder.Frames.Add(BitmapFrame.Create(PreviewImage));
+                    encoder.Save(stream);
+
+                    AddLog($"PNG 导出成功: {dialog.FileName}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"PNG 导出失败: {ex.Message}");
+                CustomMessageBox.Show($"PNG 导出失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
