@@ -1,16 +1,13 @@
 using IcoConverter.Models;
 using IcoConverter.Services;
 using IcoConverter.Utils;
-using System.Collections.Generic;
+using Microsoft.Extensions.DependencyInjection;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using WinForms = System.Windows.Forms;
-using IcoConverter;
-using Microsoft.Extensions.DependencyInjection;
-using System.IO;
-using Microsoft.Win32;
 
 namespace IcoConverter.ViewModels
 {
@@ -822,8 +819,8 @@ namespace IcoConverter.ViewModels
             }
             else
             {
-                AddLog("错误: 拖放的文件不是支持的图片格式。");
-                CustomMessageBox.Show("拖放的文件不是支持的图片格式。",
+                AddLog("错误: 拖放的文件不是支持的文件格式。");
+                CustomMessageBox.Show("拖放的文件不是支持的文件格式。",
                     "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
