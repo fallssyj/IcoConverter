@@ -1,10 +1,10 @@
 using IcoConverter.Models;
-using System.Buffers.Binary;
-using System.Collections.Immutable;
+using Microsoft.Win32.SafeHandles;
+using System.ComponentModel;
 using System.Drawing.Imaging;
 using System.IO;
-using System.Reflection.PortableExecutable;
-using System.Text;
+using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Media.Imaging;
 
 namespace IcoConverter.Services
@@ -59,6 +59,7 @@ namespace IcoConverter.Services
                 throw new FileNotFoundException("未找到可执行文件", binaryPath);
             }
 
+            // 先构建可能包含图标资源的文件列表（主程序 + 各类卫星资源）
             var probePaths = BuildResourceProbeList(binaryPath);
             Exception? lastError = null;
 
@@ -234,14 +235,13 @@ namespace IcoConverter.Services
                 yield return file;
             }
         }
+        /// <summary>
+        /// 使用 Win32 API 从指定文件提取 RT_GROUP_ICON / RT_ICON 组合。
+        /// </summary>
         private static IReadOnlyList<ExecutableIconCandidate> ExtractIconsFromFile(string path, System.Threading.CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            using var peReader = new System.Reflection.PortableExecutable.PEReader(stream, System.Reflection.PortableExecutable.PEStreamOptions.LeaveOpen);
-            var extractor = new ManagedExecutableIconExtractor(peReader);
-            return extractor.ExtractIcons(cancellationToken);
+            return Win32IconResourceEnumerator.Extract(path, cancellationToken);
         }
 
         /// <summary>
@@ -487,61 +487,180 @@ namespace IcoConverter.Services
             return resized;
         }
 
-        private sealed class ManagedExecutableIconExtractor
+        /// <summary>
+        /// 负责使用 Win32 资源 API 枚举并拼装 ICON 结果的辅助类。
+        /// </summary>
+        private sealed class Win32IconResourceEnumerator
         {
             private const int RtIcon = 3;
             private const int RtGroupIcon = 14;
+            private const int ErrorResourceTypeNotFound = 1813;
+            private const int ErrorResourceLangNotFound = 1815;
 
-            private readonly PEReader _peReader;
-            private readonly ImmutableArray<byte> _image;
-            private readonly int _resourceBaseOffset;
-            private readonly int _resourceLength;
-            private readonly int _resourceDirectoryRva;
-            private readonly List<ResourceRecord> _records = new();
+            private readonly SafeLibraryHandle _libraryHandle;
+            private readonly IntPtr _moduleHandle;
+            private readonly System.Threading.CancellationToken _cancellationToken;
+            private readonly List<GroupResourceRecord> _groupRecords = new();
+            private readonly Dictionary<(ushort Lang, ushort Id), byte[]> _iconCache = new();
 
-            internal ManagedExecutableIconExtractor(PEReader peReader)
+            private Win32IconResourceEnumerator(SafeLibraryHandle libraryHandle, System.Threading.CancellationToken cancellationToken)
             {
-                _peReader = peReader ?? throw new ArgumentNullException(nameof(peReader));
-                _image = peReader.GetEntireImage().GetContent();
-
-                var peHeader = peReader.PEHeaders?.PEHeader ?? throw new InvalidOperationException("无法读取 PE 头。");
-                var directory = peHeader.ResourceTableDirectory;
-
-                if (directory.RelativeVirtualAddress == 0 || directory.Size == 0)
-                {
-                    throw new InvalidOperationException("该文件不包含资源表。");
-                }
-
-                _resourceDirectoryRva = directory.RelativeVirtualAddress;
-                _resourceBaseOffset = RvaToOffset(_resourceDirectoryRva);
-                if (_resourceBaseOffset < 0)
-                {
-                    throw new InvalidOperationException("无法定位资源表所在的节。");
-                }
-
-                var maxReadableLength = _image.Length - _resourceBaseOffset;
-                if (maxReadableLength <= 0)
-                {
-                    throw new InvalidOperationException("资源表范围无效。");
-                }
-
-                _resourceLength = maxReadableLength;
+                _libraryHandle = libraryHandle;
+                _moduleHandle = libraryHandle.DangerousGetHandle();
+                _cancellationToken = cancellationToken;
             }
 
-            internal IReadOnlyList<ExecutableIconCandidate> ExtractIcons(System.Threading.CancellationToken cancellationToken)
+            internal static IReadOnlyList<ExecutableIconCandidate> Extract(string path, System.Threading.CancellationToken cancellationToken)
             {
-                if (_records.Count == 0)
+                var flags = NativeMethods.LoadLibraryFlags.LOAD_LIBRARY_AS_DATAFILE | NativeMethods.LoadLibraryFlags.LOAD_LIBRARY_AS_IMAGE_RESOURCE;
+                var handle = NativeMethods.LoadLibraryEx(path, IntPtr.Zero, flags);
+                if (handle.IsInvalid)
                 {
-                    TraverseDirectory(0, level: 0, typeIdentifier: null, nameIdentifier: null, cancellationToken);
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), $"无法加载文件 '{path}' 以扫描图标资源。");
                 }
 
-                var iconLookup = BuildIconLookup();
-                var groupRecords = _records.Where(r => r.TypeId == RtGroupIcon).ToList();
-
-                var candidates = new List<ExecutableIconCandidate>(groupRecords.Count);
-                foreach (var group in groupRecords)
+                using (handle)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
+                    var enumerator = new Win32IconResourceEnumerator(handle, cancellationToken);
+                    enumerator.EnumerateGroupResources();
+                    return enumerator.BuildCandidates();
+                }
+            }
+
+            private void EnumerateGroupResources()
+            {
+                var gcHandle = GCHandle.Alloc(this);
+                try
+                {
+                    if (!NativeMethods.EnumResourceNames(_moduleHandle, new IntPtr(RtGroupIcon), EnumResourceNameThunk, GCHandle.ToIntPtr(gcHandle)))
+                    {
+                        var error = Marshal.GetLastWin32Error();
+                        if (error != ErrorResourceTypeNotFound)
+                        {
+                            throw new Win32Exception(error, "枚举图标组资源失败。");
+                        }
+                    }
+                }
+                finally
+                {
+                    gcHandle.Free();
+                }
+            }
+
+            private static bool EnumResourceNameThunk(IntPtr hModule, IntPtr type, IntPtr name, IntPtr parameter)
+            {
+                var handle = GCHandle.FromIntPtr(parameter);
+                if (handle.Target is Win32IconResourceEnumerator enumerator)
+                {
+                    return enumerator.HandleGroupResource(type, name);
+                }
+
+                return false;
+            }
+
+            private bool HandleGroupResource(IntPtr type, IntPtr name)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+
+                var identifier = ResourceIdentifier.FromWin32Value(name);
+                var context = new GroupLanguageContext(this, identifier);
+                var gcHandle = GCHandle.Alloc(context);
+
+                try
+                {
+                    if (!NativeMethods.EnumResourceLanguages(_moduleHandle, type, name, EnumResourceLanguageThunk, GCHandle.ToIntPtr(gcHandle)))
+                    {
+                        var error = Marshal.GetLastWin32Error();
+                        if (error != ErrorResourceLangNotFound)
+                        {
+                            throw new Win32Exception(error, $"枚举资源语言失败: {identifier.ToDisplayString()}");
+                        }
+                    }
+                }
+                finally
+                {
+                    gcHandle.Free();
+                }
+
+                return true;
+            }
+
+            private static bool EnumResourceLanguageThunk(IntPtr hModule, IntPtr type, IntPtr name, ushort language, IntPtr parameter)
+            {
+                var handle = GCHandle.FromIntPtr(parameter);
+                if (handle.Target is GroupLanguageContext context)
+                {
+                    return context.Owner.HandleGroupLanguage(context.Identifier, type, name, language);
+                }
+
+                return false;
+            }
+
+            private bool HandleGroupLanguage(ResourceIdentifier identifier, IntPtr type, IntPtr name, ushort language)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+
+                var data = ReadResourceBytes(type, name, language);
+                if (data.Length == 0)
+                {
+                    return true;
+                }
+
+                _groupRecords.Add(new GroupResourceRecord(identifier, language, data));
+                return true;
+            }
+
+            private byte[] ReadResourceBytes(IntPtr type, IntPtr name, ushort language)
+            {
+                var resourceHandle = NativeMethods.FindResourceEx(_moduleHandle, type, name, language);
+                if (resourceHandle == IntPtr.Zero)
+                {
+                    return Array.Empty<byte>();
+                }
+
+                var size = NativeMethods.SizeofResource(_moduleHandle, resourceHandle);
+                if (size == 0)
+                {
+                    return Array.Empty<byte>();
+                }
+
+                if (size > int.MaxValue)
+                {
+                    throw new InvalidOperationException("资源数据过大，无法加载。");
+                }
+
+                var dataHandle = NativeMethods.LoadResource(_moduleHandle, resourceHandle);
+                if (dataHandle == IntPtr.Zero)
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "加载资源失败。");
+                }
+
+                var pointer = NativeMethods.LockResource(dataHandle);
+                if (pointer == IntPtr.Zero)
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "锁定资源失败。");
+                }
+
+                var buffer = new byte[size];
+                Marshal.Copy(pointer, buffer, 0, (int)size);
+                return buffer;
+            }
+
+            /// <summary>
+            /// 把枚举到的图标组与对应位图数据转换为 UI 可用的候选项。
+            /// </summary>
+            private IReadOnlyList<ExecutableIconCandidate> BuildCandidates()
+            {
+                if (_groupRecords.Count == 0)
+                {
+                    return Array.Empty<ExecutableIconCandidate>();
+                }
+
+                var candidates = new List<ExecutableIconCandidate>(_groupRecords.Count);
+
+                foreach (var group in _groupRecords)
+                {
+                    _cancellationToken.ThrowIfCancellationRequested();
 
                     var entries = IconResourceExtractor.ReadGroupEntries(group.Data);
                     if (entries.Count == 0)
@@ -557,30 +676,35 @@ namespace IcoConverter.Services
                         .ToArray();
 
                     var iconPayloads = new List<byte[]>(entries.Count);
-                    var missingResource = false;
+                    var missing = false;
 
                     foreach (var entry in entries)
                     {
-                        if (!TryResolveIconBytes(entry.ResourceId, group.LanguageId, iconLookup, out var payload))
+                        if (!TryLoadIconEntry(entry.ResourceId, group.LanguageId, out var payload))
                         {
-                            missingResource = true;
+                            missing = true;
                             break;
                         }
 
                         iconPayloads.Add(payload);
                     }
 
-                    if (missingResource)
+                    if (missing)
                     {
                         continue;
                     }
 
                     var icoBytes = IconResourceExtractor.BuildIcoFromEntries(entries, iconPayloads);
-                    var displayName = group.DisplayName;
                     var score = IconResourceExtractor.CalculateQualityScore(entries);
-                    var groupId = group.TryGetNameId(out var nameId) ? nameId : -1;
+                    var groupId = group.NameIdentifier.TryGetId(out var id) ? id : -1;
 
-                    candidates.Add(new ExecutableIconCandidate(displayName, groupId, group.LanguageId, frames, icoBytes, score));
+                    candidates.Add(new ExecutableIconCandidate(
+                        group.NameIdentifier.ToDisplayString(),
+                        groupId,
+                        group.LanguageId,
+                        frames,
+                        icoBytes,
+                        score));
                 }
 
                 return candidates
@@ -589,91 +713,35 @@ namespace IcoConverter.Services
                     .ToArray();
             }
 
-            private void TraverseDirectory(int directoryOffset, int level, ResourceIdentifier? typeIdentifier, ResourceIdentifier? nameIdentifier, System.Threading.CancellationToken cancellationToken)
+            private bool TryLoadIconEntry(ushort iconId, ushort preferredLanguage, out byte[] data)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                EnsureRange(directoryOffset, 16);
-
-                ushort namedEntries = ReadUInt16(directoryOffset + 12);
-                ushort idEntries = ReadUInt16(directoryOffset + 14);
-                int entryCount = namedEntries + idEntries;
-                int entriesStart = directoryOffset + 16;
-
-                for (int i = 0; i < entryCount; i++)
+                if (TryGetCached(preferredLanguage, iconId, out data))
                 {
-                    var nameValue = ReadUInt32(entriesStart + i * 8);
-                    var offsetValue = ReadUInt32(entriesStart + i * 8 + 4);
-                    var identifier = ResolveIdentifier(nameValue);
-                    bool isDirectory = (offsetValue & 0x8000_0000) != 0;
-                    int targetOffset = (int)(offsetValue & 0x7FFF_FFFF);
-
-                    if (isDirectory)
-                    {
-                        if (level == 0)
-                        {
-                            TraverseDirectory(targetOffset, 1, identifier, null, cancellationToken);
-                        }
-                        else if (level == 1)
-                        {
-                            TraverseDirectory(targetOffset, 2, typeIdentifier, identifier, cancellationToken);
-                        }
-                        else
-                        {
-                            TraverseDirectory(targetOffset, level + 1, typeIdentifier, nameIdentifier, cancellationToken);
-                        }
-
-                        continue;
-                    }
-
-                    if (typeIdentifier == null || nameIdentifier == null)
-                    {
-                        continue;
-                    }
-
-                    var dataEntry = ReadDataEntry(targetOffset);
-                    AddResource(typeIdentifier.Value, nameIdentifier.Value, identifier, dataEntry);
-                }
-            }
-
-            private Dictionary<int, Dictionary<int, byte[]>> BuildIconLookup()
-            {
-                var lookup = new Dictionary<int, Dictionary<int, byte[]>>();
-                foreach (var record in _records.Where(r => r.TypeId == RtIcon))
-                {
-                    if (!record.TryGetNameId(out var iconId))
-                    {
-                        continue;
-                    }
-
-                    if (!lookup.TryGetValue(iconId, out var langMap))
-                    {
-                        langMap = new Dictionary<int, byte[]>();
-                        lookup[iconId] = langMap;
-                    }
-
-                    langMap[record.LanguageId] = record.Data;
+                    return true;
                 }
 
-                return lookup;
-            }
-
-            private bool TryResolveIconBytes(int resourceId, int languageId, Dictionary<int, Dictionary<int, byte[]>> lookup, out byte[] data)
-            {
-                if (lookup.TryGetValue(resourceId, out var langMap))
+                if (TryReadIconBytes(iconId, preferredLanguage, out data))
                 {
-                    if (langMap.TryGetValue(languageId, out data!))
+                    _iconCache[(preferredLanguage, iconId)] = data;
+                    return true;
+                }
+
+                if (preferredLanguage != 0 && TryReadIconBytes(iconId, 0, out data))
+                {
+                    _iconCache[(0, iconId)] = data;
+                    return true;
+                }
+
+                foreach (var language in EnumerateIconLanguages(iconId))
+                {
+                    if (language == preferredLanguage)
                     {
-                        return true;
+                        continue;
                     }
 
-                    if (langMap.TryGetValue(0, out data!))
+                    if (TryReadIconBytes(iconId, language, out data))
                     {
-                        return true;
-                    }
-
-                    if (langMap.Count > 0)
-                    {
-                        data = langMap.Values.First();
+                        _iconCache[(language, iconId)] = data;
                         return true;
                     }
                 }
@@ -682,169 +750,79 @@ namespace IcoConverter.Services
                 return false;
             }
 
-            private void AddResource(ResourceIdentifier typeIdentifier, ResourceIdentifier nameIdentifier, ResourceIdentifier languageIdentifier, ResourceDataEntry dataEntry)
+            private bool TryGetCached(ushort language, ushort iconId, out byte[] data)
             {
-                if (!typeIdentifier.TryGetId(out int typeId))
+                return _iconCache.TryGetValue((language, iconId), out data!);
+            }
+
+            private bool TryReadIconBytes(ushort iconId, ushort language, out byte[] data)
+            {
+                var bytes = ReadResourceBytes(new IntPtr(RtIcon), new IntPtr(iconId), language);
+                if (bytes.Length == 0)
                 {
-                    return;
+                    data = Array.Empty<byte>();
+                    return false;
                 }
 
-                int languageId = languageIdentifier.TryGetId(out var lang) ? lang : 0;
-                var data = ReadResourcePayload(dataEntry);
-                _records.Add(new ResourceRecord(typeId, nameIdentifier, languageId, data));
+                data = bytes;
+                return true;
             }
 
-            private byte[] ReadResourcePayload(ResourceDataEntry dataEntry)
+            /// <summary>
+            /// 列举单个 RT_ICON 资源所有可用语言，便于做语言回退。
+            /// </summary>
+            private IEnumerable<ushort> EnumerateIconLanguages(ushort iconId)
             {
-                if (dataEntry.Size <= 0)
+                var languages = new List<ushort>();
+                var gcHandle = GCHandle.Alloc(languages);
+                try
                 {
-                    return Array.Empty<byte>();
+                    NativeMethods.EnumResourceLanguages(_moduleHandle, new IntPtr(RtIcon), new IntPtr(iconId), IconLanguageEnumThunk, GCHandle.ToIntPtr(gcHandle));
+                }
+                finally
+                {
+                    gcHandle.Free();
                 }
 
-                var dataOffset = RvaToOffset(dataEntry.OffsetToData);
-                if (dataOffset < 0 || dataOffset + dataEntry.Size > _image.Length)
+                return languages;
+            }
+
+            private static bool IconLanguageEnumThunk(IntPtr hModule, IntPtr type, IntPtr name, ushort language, IntPtr parameter)
+            {
+                var handle = GCHandle.FromIntPtr(parameter);
+                if (handle.Target is List<ushort> languages && !languages.Contains(language))
                 {
-                    throw new InvalidOperationException("资源数据超出范围。");
+                    languages.Add(language);
                 }
 
-                return _image.AsSpan(dataOffset, dataEntry.Size).ToArray();
+                return true;
             }
 
-            private ResourceDataEntry ReadDataEntry(int offset)
+            private sealed class GroupLanguageContext
             {
-                EnsureRange(offset, 16);
-                var span = ReadSpan(offset, 16);
-
-                return new ResourceDataEntry(
-                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)),
-                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)),
-                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(8, 4)),
-                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(12, 4)));
-            }
-
-            private ResourceIdentifier ResolveIdentifier(uint value)
-            {
-                const uint nameMask = 0x8000_0000;
-                if ((value & nameMask) == 0)
+                internal GroupLanguageContext(Win32IconResourceEnumerator owner, ResourceIdentifier identifier)
                 {
-                    return ResourceIdentifier.FromId((int)value);
+                    Owner = owner;
+                    Identifier = identifier;
                 }
 
-                int offset = (int)(value & ~nameMask);
-                EnsureRange(offset, 2);
-                ushort length = ReadUInt16(offset);
-                int byteLength = length * 2;
-                EnsureRange(offset + 2, byteLength);
-                var span = ReadSpan(offset + 2, byteLength);
-                var text = Encoding.Unicode.GetString(span);
-                return ResourceIdentifier.FromName(text);
-            }
-
-            private ushort ReadUInt16(int offset)
-            {
-                EnsureRange(offset, 2);
-                return BinaryPrimitives.ReadUInt16LittleEndian(ReadSpan(offset, 2));
-            }
-
-            private uint ReadUInt32(int offset)
-            {
-                EnsureRange(offset, 4);
-                return BinaryPrimitives.ReadUInt32LittleEndian(ReadSpan(offset, 4));
-            }
-
-            private ReadOnlySpan<byte> ReadSpan(int relativeOffset, int length)
-            {
-                EnsureRange(relativeOffset, length);
-                var start = _resourceBaseOffset + relativeOffset;
-                return _image.AsSpan(start, length);
-            }
-
-            private void EnsureRange(int offset, int length)
-            {
-                if (offset < 0 || length < 0 || offset + length > _resourceLength)
-                {
-                    throw new InvalidOperationException("资源目录结构无效或已损坏。");
-                }
-            }
-
-            private int RvaToOffset(int rva)
-            {
-                var relativeToResource = rva - _resourceDirectoryRva;
-                if (relativeToResource >= 0 && relativeToResource < _resourceLength)
-                {
-                    return _resourceBaseOffset + relativeToResource;
-                }
-
-                foreach (var section in _peReader.PEHeaders!.SectionHeaders)
-                {
-                    var start = section.VirtualAddress;
-                    var virtualSize = Math.Max(section.VirtualSize, section.SizeOfRawData);
-                    if (virtualSize == 0)
-                    {
-                        continue;
-                    }
-
-                    if (rva < start || rva >= start + virtualSize)
-                    {
-                        continue;
-                    }
-
-                    if (section.SizeOfRawData == 0)
-                    {
-                        continue;
-                    }
-
-                    var relative = rva - start;
-                    if (relative < 0 || relative >= section.SizeOfRawData)
-                    {
-                        continue;
-                    }
-
-                    var offset = section.PointerToRawData + relative;
-                    if (offset >= 0 && offset < _image.Length)
-                    {
-                        return offset;
-                    }
-                    break;
-                }
-
-                return -1;
+                internal Win32IconResourceEnumerator Owner { get; }
+                internal ResourceIdentifier Identifier { get; }
             }
         }
 
-        private readonly struct ResourceRecord
+        private readonly struct GroupResourceRecord
         {
-            internal ResourceRecord(int typeId, ResourceIdentifier nameIdentifier, int languageId, byte[] data)
+            internal GroupResourceRecord(ResourceIdentifier nameIdentifier, ushort languageId, byte[] data)
             {
-                TypeId = typeId;
                 NameIdentifier = nameIdentifier;
                 LanguageId = languageId;
                 Data = data;
             }
 
-            internal int TypeId { get; }
             internal ResourceIdentifier NameIdentifier { get; }
-            internal int LanguageId { get; }
+            internal ushort LanguageId { get; }
             internal byte[] Data { get; }
-
-            internal bool TryGetNameId(out int value) => NameIdentifier.TryGetId(out value);
-            internal string DisplayName => NameIdentifier.ToDisplayString();
-        }
-
-        private readonly struct ResourceDataEntry
-        {
-            internal ResourceDataEntry(int offsetToData, int size, int codePage, int reserved)
-            {
-                OffsetToData = offsetToData;
-                Size = size;
-                CodePage = codePage;
-                Reserved = reserved;
-            }
-
-            internal int OffsetToData { get; }
-            internal int Size { get; }
-            internal int CodePage { get; }
-            internal int Reserved { get; }
         }
 
         private readonly struct ResourceIdentifier
@@ -866,6 +844,18 @@ namespace IcoConverter.Services
 
             internal static ResourceIdentifier FromId(int id) => new(id);
             internal static ResourceIdentifier FromName(string name) => new(name);
+            internal static ResourceIdentifier FromWin32Value(IntPtr value)
+            {
+                if (IsIntResource(value))
+                {
+                    return FromId(value.ToInt32());
+                }
+
+                var text = Marshal.PtrToStringUni(value) ?? string.Empty;
+                return FromName(text);
+            }
+
+            private static bool IsIntResource(IntPtr value) => ((ulong)value.ToInt64() >> 16) == 0;
 
             internal bool TryGetId(out int value)
             {
@@ -1019,6 +1009,60 @@ namespace IcoConverter.Services
             internal ushort BitCount { get; }
             internal uint BytesInRes { get; }
             internal ushort ResourceId { get; }
+        }
+
+        /// <summary>
+        /// Win32 P/Invoke 声明；仅包含图标枚举所需的内核 API。
+        /// </summary>
+        private static class NativeMethods
+        {
+            [Flags]
+            internal enum LoadLibraryFlags : uint
+            {
+                DONT_RESOLVE_DLL_REFERENCES = 0x0000_0001,
+                LOAD_LIBRARY_AS_DATAFILE = 0x0000_0002,
+                LOAD_WITH_ALTERED_SEARCH_PATH = 0x0000_0008,
+                LOAD_IGNORE_CODE_AUTHZ_LEVEL = 0x0000_0010,
+                LOAD_LIBRARY_AS_IMAGE_RESOURCE = 0x0000_0020,
+                LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE = 0x0000_0040,
+            }
+
+            internal delegate bool EnumResourceNameProc(IntPtr hModule, IntPtr lpszType, IntPtr lpszName, IntPtr lParam);
+            internal delegate bool EnumResourceLangProc(IntPtr hModule, IntPtr lpszType, IntPtr lpszName, ushort wIDLanguage, IntPtr lParam);
+
+            [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+            internal static extern SafeLibraryHandle LoadLibraryEx(string lpFileName, IntPtr hFile, LoadLibraryFlags dwFlags);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            internal static extern bool FreeLibrary(IntPtr hModule);
+
+            [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+            internal static extern bool EnumResourceNames(IntPtr hModule, IntPtr lpszType, EnumResourceNameProc lpEnumFunc, IntPtr lParam);
+
+            [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+            internal static extern bool EnumResourceLanguages(IntPtr hModule, IntPtr lpszType, IntPtr lpszName, EnumResourceLangProc lpEnumFunc, IntPtr lParam);
+
+            [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+            internal static extern IntPtr FindResourceEx(IntPtr hModule, IntPtr lpType, IntPtr lpName, ushort wLanguage);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            internal static extern IntPtr LoadResource(IntPtr hModule, IntPtr hResInfo);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            internal static extern IntPtr LockResource(IntPtr hResData);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            internal static extern uint SizeofResource(IntPtr hModule, IntPtr hResInfo);
+        }
+
+        private sealed class SafeLibraryHandle : SafeHandleZeroOrMinusOneIsInvalid
+        {
+            private SafeLibraryHandle()
+                : base(true)
+            {
+            }
+
+            protected override bool ReleaseHandle() => NativeMethods.FreeLibrary(handle);
         }
     }
 }
