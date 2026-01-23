@@ -44,9 +44,11 @@ public partial class App : System.Windows.Application
         // 注册ViewModels
         services.AddSingleton<MainViewModel>();
         services.AddTransient<IcoToPngViewModel>();
+        services.AddTransient<ExecutableIconPickerViewModel>();
 
         // 注册Views
         services.AddSingleton<MainWindow>();
         services.AddTransient<IcoToPngWindow>();
+        services.AddTransient<ExecutableIconPickerWindow>();
     }
 }

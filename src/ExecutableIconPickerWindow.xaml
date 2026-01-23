@@ -1,0 +1,210 @@
+<hc:Window
+    x:Class="IcoConverter.ExecutableIconPickerWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:hc="https://handyorg.github.io/handycontrol"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:viewModels="clr-namespace:IcoConverter.ViewModels"
+    Title="图标提取器"
+    Width="1000"
+    Height="800"
+    WindowStartupLocation="CenterOwner"
+    mc:Ignorable="d">
+    <hc:Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+    </hc:Window.Resources>
+    <Border Padding="20">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Margin="0,0,0,14">
+                <TextBlock
+                    FontSize="20"
+                    FontWeight="SemiBold"
+                    Text="扫描并导出可执行文件中的图标" />
+                <TextBlock Margin="0,4,0,0" Text="选择要导出的图标组合，批量保存为 ICO 文件。" />
+            </StackPanel>
+
+            <Grid Grid.Row="1" Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="320" />
+                </Grid.ColumnDefinitions>
+
+                <Border
+                    Grid.Column="0"
+                    Padding="16"
+                    CornerRadius="12">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Text="当前文件" />
+                        <TextBlock
+                            Grid.Row="1"
+                            Margin="0,4,0,0"
+                            FontSize="15"
+                            FontWeight="Medium"
+                            Text="{Binding BinaryFileName}" />
+                        <StackPanel Grid.Row="2" Margin="0,10,0,0">
+                            <TextBlock Text="输出目录" />
+                            <Grid Margin="0,6,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox
+                                    Grid.Column="0"
+                                    Height="34"
+                                    VerticalContentAlignment="Center"
+                                    Text="{Binding OutputDirectory, UpdateSourceTrigger=PropertyChanged}" />
+                                <Button
+                                    Grid.Column="1"
+                                    Width="86"
+                                    Height="34"
+                                    Margin="8,0,0,0"
+                                    Command="{Binding BrowseOutputCommand}"
+                                    Content="浏览"
+                                    Style="{StaticResource ButtonPrimary}" />
+                            </Grid>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Border
+                    Grid.Column="1"
+                    Margin="16,0,0,0"
+                    Padding="16"
+                    CornerRadius="12">
+                    <StackPanel>
+                        <TextBlock Text="状态" />
+                        <TextBlock
+                            Margin="0,4,0,0"
+                            FontSize="15"
+                            FontWeight="Medium"
+                            Text="{Binding StatusMessage}" />
+                        <Separator Margin="0,16" />
+                        <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                            <Button
+                                Width="80"
+                                Height="32"
+                                Margin="0,0,8,0"
+                                Command="{Binding RefreshCommand}"
+                                Content="重新扫描" />
+                            <Button
+                                Width="80"
+                                Height="32"
+                                Command="{Binding SelectAllCommand}"
+                                Content="全选"
+                                Style="{StaticResource ButtonPrimary}" />
+                            <Button
+                                Width="80"
+                                Height="32"
+                                Margin="0,0,8,0"
+                                Command="{Binding ClearAllCommand}"
+                                Content="清空" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Border
+                Grid.Row="2"
+                Padding="12"
+                CornerRadius="16">
+                <Grid>
+                    <ListBox ItemsSource="{Binding IconOptions}" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type viewModels:ExecutableIconOption}">
+
+                                <ToggleButton
+                                    Width="150"
+                                    Height="150"
+                                    Margin="5"
+                                    BorderThickness="0"
+                                    IsChecked="{Binding IsSelected, Mode=TwoWay}">
+                                    <StackPanel>
+                                        <Image
+                                            Width="64"
+                                            Height="64"
+                                            Source="{Binding Preview}"
+                                            Stretch="Uniform" />
+                                        <TextBlock
+                                            MaxWidth="100"
+                                            Margin="0,10,0,0"
+                                            HorizontalAlignment="Center"
+                                            Text="{Binding DisplayName, StringFormat=\{0:0...\}}"
+                                            TextTrimming="CharacterEllipsis"
+                                            TextWrapping="NoWrap" />
+
+                                    </StackPanel>
+
+
+                                </ToggleButton>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+
+                    <StackPanel
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Visibility="{Binding IsEmptyStateVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <TextBlock
+                            FontSize="18"
+                            FontWeight="SemiBold"
+                            Text="未找到图标" />
+                        <TextBlock Margin="0,6,0,0" Text="该可执行文件未包含可导出的 ICO 资源。" />
+                    </StackPanel>
+
+                    <Border CornerRadius="12" Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <hc:LoadingCircle Width="42" Height="42" />
+                            <TextBlock Margin="0,10,0,0" Text="正在扫描..." />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="3" Margin="0,16,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    Text="导出路径默认为桌面\文件名-output，可手动调整。" />
+                <Button
+                    Grid.Column="1"
+                    Width="120"
+                    Height="38"
+                    Margin="0,0,10,0"
+                    Command="{Binding ExportCommand}"
+                    Content="导出所选"
+                    Style="{StaticResource ButtonPrimary}" />
+                <Button
+                    Grid.Column="2"
+                    Width="90"
+                    Height="38"
+                    Command="{Binding CloseCommand}"
+                    Content="关闭" />
+            </Grid>
+        </Grid>
+    </Border>
+</hc:Window>

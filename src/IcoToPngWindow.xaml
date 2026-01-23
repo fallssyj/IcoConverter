@@ -72,7 +72,8 @@
                     Height="30"
                     Margin="6,0,0,0"
                     Command="{Binding BrowseOutputCommand}"
-                    Content="浏览" />
+                    Content="浏览"
+                    Style="{StaticResource ButtonPrimary}" />
             </Grid>
 
             <Border Grid.Row="2" Padding="12">
@@ -97,7 +98,8 @@
                             Height="30"
                             Margin="0,0,10,0"
                             Command="{Binding SelectAllCommand}"
-                            Content="全选" />
+                            Content="全选"
+                            Style="{StaticResource ButtonPrimary}" />
                         <Button
                             Width="80"
                             Height="30"
@@ -125,7 +127,8 @@
                     Height="30"
                     Margin="0,0,10,0"
                     Command="{Binding ConvertCommand}"
-                    Content="导出" />
+                    Content="导出"
+                    Style="{StaticResource ButtonPrimary}" />
                 <Button
                     Grid.Column="2"
                     Width="90"

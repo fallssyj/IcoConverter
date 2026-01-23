@@ -1,6 +1,7 @@
 using IcoConverter.Models;
 using IcoConverter.Services;
 using IcoConverter.Utils;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Input;
@@ -50,6 +51,7 @@ namespace IcoConverter.ViewModels
         private const int SvgRenderMaxSize = 1024;
         // 统一图像 DPI 的目标值（可调整）
         private double _targetDpi = 96d;
+        private static readonly HashSet<string> ExecutableExtensions = new(StringComparer.OrdinalIgnoreCase) { ".exe", ".dll" };
         /// <summary>
         /// 切换浅色/深色主题的命令。
         /// </summary>
@@ -395,7 +397,7 @@ namespace IcoConverter.ViewModels
             {
                 var dialog = new Microsoft.Win32.OpenFileDialog
                 {
-                    Filter = "图片或可执行文件|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.svg;*.ico;*.exe|所有文件|*.*",
+                    Filter = "图片或可执行文件|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.svg;*.ico;*.exe;*.dll|所有文件|*.*",
                     Title = "选择图片或可执行文件"
                 };
 
@@ -701,7 +703,7 @@ namespace IcoConverter.ViewModels
 
                 if (IsExecutableFile(filePath))
                 {
-                    ExtractExecutableIcon(filePath);
+                    OpenExecutableIconPicker(filePath);
                     return;
                 }
 
@@ -800,7 +802,7 @@ namespace IcoConverter.ViewModels
             var executableFile = resolvedFiles.FirstOrDefault(IsExecutableFile);
             if (!string.IsNullOrEmpty(executableFile))
             {
-                ExtractExecutableIcon(executableFile);
+                OpenExecutableIconPicker(executableFile);
                 return;
             }
 
@@ -839,59 +841,30 @@ namespace IcoConverter.ViewModels
         /// </summary>
         private static bool IsExecutableFile(string filePath)
         {
-            return string.Equals(System.IO.Path.GetExtension(filePath), ".exe", StringComparison.OrdinalIgnoreCase);
+            var extension = System.IO.Path.GetExtension(filePath);
+            return !string.IsNullOrWhiteSpace(extension) && ExecutableExtensions.Contains(extension);
         }
 
         /// <summary>
-        /// 提取可执行文件的关联图标并提示保存。
+        /// 打开图标提取窗口，供用户选择并导出可执行文件中的图标。
         /// </summary>
-        private async void ExtractExecutableIcon(string filePath)
+        private void OpenExecutableIconPicker(string filePath)
         {
             try
             {
-                AddLog($"检测到可执行文件: {filePath}");
-                var dialog = new Microsoft.Win32.SaveFileDialog
+                AddLog($"检测到可执行/库文件: {filePath}");
+                System.Windows.Application.Current.Dispatcher.BeginInvoke(() =>
                 {
-                    Filter = "ICO 文件|*.ico",
-                    DefaultExt = ".ico",
-                    Title = "保存提取的图标",
-                    FileName = $"{Path.GetFileNameWithoutExtension(filePath)}.ico",
-                    OverwritePrompt = true
-                };
-
-                if (dialog.ShowDialog() != true)
-                {
-                    AddLog("已取消提取 EXE 图标。");
-                    return;
-                }
-
-                IsProcessing = true;
-                _cts = new System.Threading.CancellationTokenSource();
-
-                try
-                {
-                    await _icoConverterService.ExtractIconFromExecutableAsync(filePath, dialog.FileName, _cts.Token);
-                    AddLog($"成功提取 EXE 图标: {dialog.FileName}");
-                    CustomMessageBox.Show("图标提取完成并已保存。", "操作完成", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-                catch (OperationCanceledException)
-                {
-                    AddLog("提取 EXE 图标已取消。");
-                }
-                finally
-                {
-                    _cts?.Dispose();
-                    _cts = null;
-                }
+                    var window = App.ServiceProvider.GetRequiredService<ExecutableIconPickerWindow>();
+                    window.Owner = GetAssociatedWindow();
+                    window.Initialize(filePath);
+                    window.ShowDialog();
+                }, System.Windows.Threading.DispatcherPriority.Background);
             }
             catch (Exception ex)
             {
-                AddLog($"提取 EXE 图标时出错: {ex.Message}");
-                CustomMessageBox.Show($"无法提取 EXE 图标: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-            finally
-            {
-                IsProcessing = false;
+                AddLog($"打开图标提取器时出错: {ex.Message}");
+                CustomMessageBox.Show($"无法打开图标提取器: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 

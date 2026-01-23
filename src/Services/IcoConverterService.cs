@@ -1,11 +1,10 @@
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Drawing;
+using IcoConverter.Models;
+using System.Buffers.Binary;
+using System.Collections.Immutable;
 using System.Drawing.Imaging;
 using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices;
+using System.Reflection.PortableExecutable;
+using System.Text;
 using System.Windows.Media.Imaging;
 
 namespace IcoConverter.Services
@@ -49,82 +48,200 @@ namespace IcoConverter.Services
         }
 
         /// <summary>
-        /// 从给定的可执行文件中提取关联图标并保存成 ICO 文件。
+        /// 扫描可执行文件或 DLL，并返回其中包含的所有图标组合。
         /// </summary>
-        public async System.Threading.Tasks.Task ExtractIconFromExecutableAsync(string executablePath, string outputPath, System.Threading.CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task<IReadOnlyList<ExecutableIconCandidate>> ScanExecutableIconsAsync(string binaryPath, System.Threading.CancellationToken cancellationToken = default)
         {
-            ArgumentException.ThrowIfNullOrEmpty(executablePath);
-            ArgumentException.ThrowIfNullOrEmpty(outputPath);
+            ArgumentException.ThrowIfNullOrEmpty(binaryPath);
 
-            if (!File.Exists(executablePath))
+            if (!File.Exists(binaryPath))
             {
-                throw new FileNotFoundException("未找到可执行文件", executablePath);
+                throw new FileNotFoundException("未找到可执行文件", binaryPath);
             }
 
+            var probePaths = BuildResourceProbeList(binaryPath);
+            Exception? lastError = null;
+
+            foreach (var path in probePaths)
+            {
+                try
+                {
+                    var icons = await System.Threading.Tasks.Task.Run(() => ExtractIconsFromFile(path, cancellationToken), cancellationToken).ConfigureAwait(false);
+                    if (icons.Count > 0)
+                    {
+                        return icons;
+                    }
+
+                    lastError = new InvalidOperationException($"在文件 '{path}' 中未找到图标资源。");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                }
+            }
+
+            throw lastError ?? new InvalidOperationException("未在指定文件及其资源包中找到任何图标。");
+        }
+
+        /// <summary>
+        /// 根据主程序路径动态枚举所有可能携带图标资源的候选文件（含同目录/卫星目录/.mui/.mun）。
+        /// </summary>
+        private static IReadOnlyList<string> BuildResourceProbeList(string binaryPath)
+        {
+            var results = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void TryAdd(string? candidate)
+            {
+                if (string.IsNullOrWhiteSpace(candidate))
+                {
+                    return;
+                }
+
+                if (!File.Exists(candidate))
+                {
+                    return;
+                }
+
+                if (seen.Add(candidate))
+                {
+                    results.Add(candidate);
+                }
+            }
+
+            TryAdd(binaryPath);
+
+            var directory = Path.GetDirectoryName(binaryPath);
+            var fileName = Path.GetFileName(binaryPath);
+            if (string.IsNullOrEmpty(fileName))
+            {
+                return results;
+            }
+
+            // 收集需要探测的根目录，避免重复访问
+            var probeRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                probeRoots.Add(directory);
+            }
+
+            var windowsDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            if (!string.IsNullOrEmpty(windowsDir))
+            {
+                probeRoots.Add(windowsDir);
+                probeRoots.Add(Path.Combine(windowsDir, "System32"));
+                probeRoots.Add(Path.Combine(windowsDir, "SystemResources"));
+            }
+
+            var systemDir = Environment.SystemDirectory;
+            if (!string.IsNullOrEmpty(systemDir))
+            {
+                probeRoots.Add(systemDir);
+            }
+
+            foreach (var root in probeRoots.Where(Directory.Exists))
+            {
+                AddSatelliteCandidates(root, fileName, TryAdd);
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// 在指定根目录下查找与给定文件名匹配的卫星资源文件（含同名、带文化后缀、文化子目录）。
+        /// </summary>
+        private static void AddSatelliteCandidates(string rootDirectory, string fileName, Action<string?> tryAdd)
+        {
+            if (string.IsNullOrEmpty(rootDirectory) || string.IsNullOrEmpty(fileName))
+            {
+                return;
+            }
+
+            tryAdd(Path.Combine(rootDirectory, fileName + ".mui"));
+            tryAdd(Path.Combine(rootDirectory, fileName + ".mun"));
+
+            // 形如 foo.exe.zh-CN.mui / foo.exe.2052.mui
+            foreach (var file in SafeEnumerateFiles(rootDirectory, fileName + ".*.mui"))
+            {
+                tryAdd(file);
+            }
+
+            foreach (var file in SafeEnumerateFiles(rootDirectory, fileName + ".*.mun"))
+            {
+                tryAdd(file);
+            }
+
+            // 形如 zh-CN\foo.exe.mui
+            foreach (var satelliteDir in SafeEnumerateDirectories(rootDirectory))
+            {
+                tryAdd(Path.Combine(satelliteDir, fileName + ".mui"));
+                tryAdd(Path.Combine(satelliteDir, fileName + ".mun"));
+            }
+        }
+
+        /// <summary>
+        /// 安全遍历单层子目录，避免因权限或长路径导致异常中断。
+        /// </summary>
+        private static IEnumerable<string> SafeEnumerateDirectories(string root)
+        {
+            if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+            {
+                yield break;
+            }
+
+            IEnumerable<string> directories;
             try
             {
-                await System.Threading.Tasks.Task.Run(() =>
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    var flags = NativeMethods.LoadLibraryFlags.LOAD_LIBRARY_AS_DATAFILE | NativeMethods.LoadLibraryFlags.LOAD_LIBRARY_AS_IMAGE_RESOURCE;
-                    var moduleHandle = NativeMethods.LoadLibraryEx(executablePath, IntPtr.Zero, flags);
-                    if (moduleHandle == IntPtr.Zero)
-                    {
-                        throw new Win32Exception(Marshal.GetLastWin32Error(), "无法加载可执行文件资源。");
-                    }
-
-                    try
-                    {
-                        var candidates = new List<(int Score, byte[] Data)>();
-                        bool enumerationResult = NativeMethods.EnumResourceNames(
-                            moduleHandle,
-                            new IntPtr(NativeMethods.RT_GROUP_ICON),
-                            (hModule, type, name, lParam) =>
-                            {
-                                cancellationToken.ThrowIfCancellationRequested();
-
-                                var entries = IconResourceExtractor.ReadGroupEntries(hModule, type, name);
-                                var icoBytes = IconResourceExtractor.BuildIcoFromEntries(hModule, entries);
-                                var score = IconResourceExtractor.CalculateQualityScore(entries);
-
-                                candidates.Add((score, icoBytes));
-                                return true;
-                            },
-                            IntPtr.Zero);
-
-                        var enumerationError = Marshal.GetLastWin32Error();
-                        if (!enumerationResult && enumerationError != 0 && candidates.Count == 0)
-                        {
-                            throw new Win32Exception(enumerationError, "枚举图标资源失败。");
-                        }
-
-                        if (candidates.Count == 0)
-                        {
-                            throw new InvalidOperationException("未在可执行文件中找到图标资源。");
-                        }
-
-                        var bestCandidate = candidates
-                            .OrderByDescending(candidate => candidate.Score)
-                            .First();
-
-                        cancellationToken.ThrowIfCancellationRequested();
-                        File.WriteAllBytes(outputPath, bestCandidate.Data);
-                    }
-                    finally
-                    {
-                        NativeMethods.FreeLibrary(moduleHandle);
-                    }
-                }, cancellationToken).ConfigureAwait(false);
+                directories = Directory.EnumerateDirectories(root);
             }
-            catch (OperationCanceledException)
+            catch
             {
-                throw;
+                yield break;
             }
-            catch (Exception ex)
+
+            foreach (var directory in directories)
             {
-                throw new InvalidOperationException($"提取可执行文件图标时出错: {ex.Message}", ex);
+                yield return directory;
             }
+        }
+
+        /// <summary>
+        /// 安全遍历指定目录下的文件，确保 I/O 异常可被吞掉。
+        /// </summary>
+        private static IEnumerable<string> SafeEnumerateFiles(string root, string searchPattern)
+        {
+            if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(searchPattern) || !Directory.Exists(root))
+            {
+                yield break;
+            }
+
+            IEnumerable<string> files;
+            try
+            {
+                files = Directory.EnumerateFiles(root, searchPattern, SearchOption.TopDirectoryOnly);
+            }
+            catch
+            {
+                yield break;
+            }
+
+            foreach (var file in files)
+            {
+                yield return file;
+            }
+        }
+        private static IReadOnlyList<ExecutableIconCandidate> ExtractIconsFromFile(string path, System.Threading.CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var peReader = new System.Reflection.PortableExecutable.PEReader(stream, System.Reflection.PortableExecutable.PEStreamOptions.LeaveOpen);
+            var extractor = new ManagedExecutableIconExtractor(peReader);
+            return extractor.ExtractIcons(cancellationToken);
         }
 
         /// <summary>
@@ -370,19 +487,431 @@ namespace IcoConverter.Services
             return resized;
         }
 
+        private sealed class ManagedExecutableIconExtractor
+        {
+            private const int RtIcon = 3;
+            private const int RtGroupIcon = 14;
+
+            private readonly PEReader _peReader;
+            private readonly ImmutableArray<byte> _image;
+            private readonly int _resourceBaseOffset;
+            private readonly int _resourceLength;
+            private readonly int _resourceDirectoryRva;
+            private readonly List<ResourceRecord> _records = new();
+
+            internal ManagedExecutableIconExtractor(PEReader peReader)
+            {
+                _peReader = peReader ?? throw new ArgumentNullException(nameof(peReader));
+                _image = peReader.GetEntireImage().GetContent();
+
+                var peHeader = peReader.PEHeaders?.PEHeader ?? throw new InvalidOperationException("无法读取 PE 头。");
+                var directory = peHeader.ResourceTableDirectory;
+
+                if (directory.RelativeVirtualAddress == 0 || directory.Size == 0)
+                {
+                    throw new InvalidOperationException("该文件不包含资源表。");
+                }
+
+                _resourceDirectoryRva = directory.RelativeVirtualAddress;
+                _resourceBaseOffset = RvaToOffset(_resourceDirectoryRva);
+                if (_resourceBaseOffset < 0)
+                {
+                    throw new InvalidOperationException("无法定位资源表所在的节。");
+                }
+
+                var maxReadableLength = _image.Length - _resourceBaseOffset;
+                if (maxReadableLength <= 0)
+                {
+                    throw new InvalidOperationException("资源表范围无效。");
+                }
+
+                _resourceLength = maxReadableLength;
+            }
+
+            internal IReadOnlyList<ExecutableIconCandidate> ExtractIcons(System.Threading.CancellationToken cancellationToken)
+            {
+                if (_records.Count == 0)
+                {
+                    TraverseDirectory(0, level: 0, typeIdentifier: null, nameIdentifier: null, cancellationToken);
+                }
+
+                var iconLookup = BuildIconLookup();
+                var groupRecords = _records.Where(r => r.TypeId == RtGroupIcon).ToList();
+
+                var candidates = new List<ExecutableIconCandidate>(groupRecords.Count);
+                foreach (var group in groupRecords)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var entries = IconResourceExtractor.ReadGroupEntries(group.Data);
+                    if (entries.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var frames = entries
+                        .Select(e => new IconFrameInfo(
+                            IconResourceExtractor.NormalizeDimension(e.Width),
+                            IconResourceExtractor.NormalizeDimension(e.Height),
+                            e.BitCount))
+                        .ToArray();
+
+                    var iconPayloads = new List<byte[]>(entries.Count);
+                    var missingResource = false;
+
+                    foreach (var entry in entries)
+                    {
+                        if (!TryResolveIconBytes(entry.ResourceId, group.LanguageId, iconLookup, out var payload))
+                        {
+                            missingResource = true;
+                            break;
+                        }
+
+                        iconPayloads.Add(payload);
+                    }
+
+                    if (missingResource)
+                    {
+                        continue;
+                    }
+
+                    var icoBytes = IconResourceExtractor.BuildIcoFromEntries(entries, iconPayloads);
+                    var displayName = group.DisplayName;
+                    var score = IconResourceExtractor.CalculateQualityScore(entries);
+                    var groupId = group.TryGetNameId(out var nameId) ? nameId : -1;
+
+                    candidates.Add(new ExecutableIconCandidate(displayName, groupId, group.LanguageId, frames, icoBytes, score));
+                }
+
+                return candidates
+                    .OrderByDescending(c => c.QualityScore)
+                    .ThenByDescending(c => c.Frames.Max(f => f.Width * f.Height))
+                    .ToArray();
+            }
+
+            private void TraverseDirectory(int directoryOffset, int level, ResourceIdentifier? typeIdentifier, ResourceIdentifier? nameIdentifier, System.Threading.CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                EnsureRange(directoryOffset, 16);
+
+                ushort namedEntries = ReadUInt16(directoryOffset + 12);
+                ushort idEntries = ReadUInt16(directoryOffset + 14);
+                int entryCount = namedEntries + idEntries;
+                int entriesStart = directoryOffset + 16;
+
+                for (int i = 0; i < entryCount; i++)
+                {
+                    var nameValue = ReadUInt32(entriesStart + i * 8);
+                    var offsetValue = ReadUInt32(entriesStart + i * 8 + 4);
+                    var identifier = ResolveIdentifier(nameValue);
+                    bool isDirectory = (offsetValue & 0x8000_0000) != 0;
+                    int targetOffset = (int)(offsetValue & 0x7FFF_FFFF);
+
+                    if (isDirectory)
+                    {
+                        if (level == 0)
+                        {
+                            TraverseDirectory(targetOffset, 1, identifier, null, cancellationToken);
+                        }
+                        else if (level == 1)
+                        {
+                            TraverseDirectory(targetOffset, 2, typeIdentifier, identifier, cancellationToken);
+                        }
+                        else
+                        {
+                            TraverseDirectory(targetOffset, level + 1, typeIdentifier, nameIdentifier, cancellationToken);
+                        }
+
+                        continue;
+                    }
+
+                    if (typeIdentifier == null || nameIdentifier == null)
+                    {
+                        continue;
+                    }
+
+                    var dataEntry = ReadDataEntry(targetOffset);
+                    AddResource(typeIdentifier.Value, nameIdentifier.Value, identifier, dataEntry);
+                }
+            }
+
+            private Dictionary<int, Dictionary<int, byte[]>> BuildIconLookup()
+            {
+                var lookup = new Dictionary<int, Dictionary<int, byte[]>>();
+                foreach (var record in _records.Where(r => r.TypeId == RtIcon))
+                {
+                    if (!record.TryGetNameId(out var iconId))
+                    {
+                        continue;
+                    }
+
+                    if (!lookup.TryGetValue(iconId, out var langMap))
+                    {
+                        langMap = new Dictionary<int, byte[]>();
+                        lookup[iconId] = langMap;
+                    }
+
+                    langMap[record.LanguageId] = record.Data;
+                }
+
+                return lookup;
+            }
+
+            private bool TryResolveIconBytes(int resourceId, int languageId, Dictionary<int, Dictionary<int, byte[]>> lookup, out byte[] data)
+            {
+                if (lookup.TryGetValue(resourceId, out var langMap))
+                {
+                    if (langMap.TryGetValue(languageId, out data!))
+                    {
+                        return true;
+                    }
+
+                    if (langMap.TryGetValue(0, out data!))
+                    {
+                        return true;
+                    }
+
+                    if (langMap.Count > 0)
+                    {
+                        data = langMap.Values.First();
+                        return true;
+                    }
+                }
+
+                data = Array.Empty<byte>();
+                return false;
+            }
+
+            private void AddResource(ResourceIdentifier typeIdentifier, ResourceIdentifier nameIdentifier, ResourceIdentifier languageIdentifier, ResourceDataEntry dataEntry)
+            {
+                if (!typeIdentifier.TryGetId(out int typeId))
+                {
+                    return;
+                }
+
+                int languageId = languageIdentifier.TryGetId(out var lang) ? lang : 0;
+                var data = ReadResourcePayload(dataEntry);
+                _records.Add(new ResourceRecord(typeId, nameIdentifier, languageId, data));
+            }
+
+            private byte[] ReadResourcePayload(ResourceDataEntry dataEntry)
+            {
+                if (dataEntry.Size <= 0)
+                {
+                    return Array.Empty<byte>();
+                }
+
+                var dataOffset = RvaToOffset(dataEntry.OffsetToData);
+                if (dataOffset < 0 || dataOffset + dataEntry.Size > _image.Length)
+                {
+                    throw new InvalidOperationException("资源数据超出范围。");
+                }
+
+                return _image.AsSpan(dataOffset, dataEntry.Size).ToArray();
+            }
+
+            private ResourceDataEntry ReadDataEntry(int offset)
+            {
+                EnsureRange(offset, 16);
+                var span = ReadSpan(offset, 16);
+
+                return new ResourceDataEntry(
+                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)),
+                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)),
+                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(8, 4)),
+                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(12, 4)));
+            }
+
+            private ResourceIdentifier ResolveIdentifier(uint value)
+            {
+                const uint nameMask = 0x8000_0000;
+                if ((value & nameMask) == 0)
+                {
+                    return ResourceIdentifier.FromId((int)value);
+                }
+
+                int offset = (int)(value & ~nameMask);
+                EnsureRange(offset, 2);
+                ushort length = ReadUInt16(offset);
+                int byteLength = length * 2;
+                EnsureRange(offset + 2, byteLength);
+                var span = ReadSpan(offset + 2, byteLength);
+                var text = Encoding.Unicode.GetString(span);
+                return ResourceIdentifier.FromName(text);
+            }
+
+            private ushort ReadUInt16(int offset)
+            {
+                EnsureRange(offset, 2);
+                return BinaryPrimitives.ReadUInt16LittleEndian(ReadSpan(offset, 2));
+            }
+
+            private uint ReadUInt32(int offset)
+            {
+                EnsureRange(offset, 4);
+                return BinaryPrimitives.ReadUInt32LittleEndian(ReadSpan(offset, 4));
+            }
+
+            private ReadOnlySpan<byte> ReadSpan(int relativeOffset, int length)
+            {
+                EnsureRange(relativeOffset, length);
+                var start = _resourceBaseOffset + relativeOffset;
+                return _image.AsSpan(start, length);
+            }
+
+            private void EnsureRange(int offset, int length)
+            {
+                if (offset < 0 || length < 0 || offset + length > _resourceLength)
+                {
+                    throw new InvalidOperationException("资源目录结构无效或已损坏。");
+                }
+            }
+
+            private int RvaToOffset(int rva)
+            {
+                var relativeToResource = rva - _resourceDirectoryRva;
+                if (relativeToResource >= 0 && relativeToResource < _resourceLength)
+                {
+                    return _resourceBaseOffset + relativeToResource;
+                }
+
+                foreach (var section in _peReader.PEHeaders!.SectionHeaders)
+                {
+                    var start = section.VirtualAddress;
+                    var virtualSize = Math.Max(section.VirtualSize, section.SizeOfRawData);
+                    if (virtualSize == 0)
+                    {
+                        continue;
+                    }
+
+                    if (rva < start || rva >= start + virtualSize)
+                    {
+                        continue;
+                    }
+
+                    if (section.SizeOfRawData == 0)
+                    {
+                        continue;
+                    }
+
+                    var relative = rva - start;
+                    if (relative < 0 || relative >= section.SizeOfRawData)
+                    {
+                        continue;
+                    }
+
+                    var offset = section.PointerToRawData + relative;
+                    if (offset >= 0 && offset < _image.Length)
+                    {
+                        return offset;
+                    }
+                    break;
+                }
+
+                return -1;
+            }
+        }
+
+        private readonly struct ResourceRecord
+        {
+            internal ResourceRecord(int typeId, ResourceIdentifier nameIdentifier, int languageId, byte[] data)
+            {
+                TypeId = typeId;
+                NameIdentifier = nameIdentifier;
+                LanguageId = languageId;
+                Data = data;
+            }
+
+            internal int TypeId { get; }
+            internal ResourceIdentifier NameIdentifier { get; }
+            internal int LanguageId { get; }
+            internal byte[] Data { get; }
+
+            internal bool TryGetNameId(out int value) => NameIdentifier.TryGetId(out value);
+            internal string DisplayName => NameIdentifier.ToDisplayString();
+        }
+
+        private readonly struct ResourceDataEntry
+        {
+            internal ResourceDataEntry(int offsetToData, int size, int codePage, int reserved)
+            {
+                OffsetToData = offsetToData;
+                Size = size;
+                CodePage = codePage;
+                Reserved = reserved;
+            }
+
+            internal int OffsetToData { get; }
+            internal int Size { get; }
+            internal int CodePage { get; }
+            internal int Reserved { get; }
+        }
+
+        private readonly struct ResourceIdentifier
+        {
+            private ResourceIdentifier(int id)
+            {
+                Id = id;
+                Name = null;
+            }
+
+            private ResourceIdentifier(string name)
+            {
+                Name = name;
+                Id = null;
+            }
+
+            internal int? Id { get; }
+            internal string? Name { get; }
+
+            internal static ResourceIdentifier FromId(int id) => new(id);
+            internal static ResourceIdentifier FromName(string name) => new(name);
+
+            internal bool TryGetId(out int value)
+            {
+                if (Id.HasValue)
+                {
+                    value = Id.Value;
+                    return true;
+                }
+
+                value = default;
+                return false;
+            }
+
+            internal string ToDisplayString()
+            {
+                if (!string.IsNullOrWhiteSpace(Name))
+                {
+                    return Name!;
+                }
+
+                if (Id.HasValue)
+                {
+                    return Id.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+
+                return "未命名";
+            }
+        }
+
         private static class IconResourceExtractor
         {
-            internal static IReadOnlyList<GroupIconEntry> ReadGroupEntries(IntPtr moduleHandle, IntPtr resourceType, IntPtr resourceName)
+            internal static IReadOnlyList<GroupIconEntry> ReadGroupEntries(byte[] groupBytes)
             {
-                var bytes = NativeMethods.LoadResourceData(moduleHandle, resourceType, resourceName);
-                using var ms = new MemoryStream(bytes);
+                if (groupBytes == null || groupBytes.Length < 6)
+                {
+                    return Array.Empty<GroupIconEntry>();
+                }
+
+                using var ms = new MemoryStream(groupBytes, writable: false);
                 using var reader = new BinaryReader(ms);
 
                 var reserved = reader.ReadUInt16();
-                var resourceTypeValue = reader.ReadUInt16();
+                var type = reader.ReadUInt16();
                 var count = reader.ReadUInt16();
 
-                if (reserved != 0 || resourceTypeValue != 1)
+                if (reserved != 0 || type != 1)
                 {
                     throw new InvalidOperationException("无效的图标组资源。");
                 }
@@ -407,18 +936,16 @@ namespace IcoConverter.Services
                     .ToArray();
             }
 
-            internal static byte[] BuildIcoFromEntries(IntPtr moduleHandle, IReadOnlyList<GroupIconEntry> entries)
+            internal static byte[] BuildIcoFromEntries(IReadOnlyList<GroupIconEntry> entries, IReadOnlyList<byte[]> iconData)
             {
                 if (entries == null || entries.Count == 0)
                 {
                     throw new InvalidOperationException("图标组为空。");
                 }
 
-                var iconData = new List<byte[]>(entries.Count);
-                foreach (var entry in entries)
+                if (iconData == null || iconData.Count != entries.Count)
                 {
-                    var data = NativeMethods.LoadResourceData(moduleHandle, new IntPtr(NativeMethods.RT_ICON), new IntPtr(entry.ResourceId));
-                    iconData.Add(data);
+                    throw new InvalidOperationException("图标数据与目录项数量不匹配。");
                 }
 
                 using var ms = new MemoryStream();
@@ -467,7 +994,7 @@ namespace IcoConverter.Services
                 return (maxArea * 1000) + maxBitDepth;
             }
 
-            private static int NormalizeDimension(byte value) => value == 0 ? 256 : value;
+            internal static int NormalizeDimension(byte value) => value == 0 ? 256 : value;
         }
 
         private readonly struct GroupIconEntry
@@ -492,74 +1019,6 @@ namespace IcoConverter.Services
             internal ushort BitCount { get; }
             internal uint BytesInRes { get; }
             internal ushort ResourceId { get; }
-        }
-
-        private static class NativeMethods
-        {
-            internal const int RT_ICON = 3;
-            internal const int RT_GROUP_ICON = 14;
-
-            [Flags]
-            internal enum LoadLibraryFlags : uint
-            {
-                LOAD_LIBRARY_AS_DATAFILE = 0x00000002,
-                LOAD_LIBRARY_AS_IMAGE_RESOURCE = 0x00000020
-            }
-
-            internal delegate bool EnumResNameProc(IntPtr hModule, IntPtr lpszType, IntPtr lpszName, IntPtr lParam);
-
-            [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-            internal static extern IntPtr LoadLibraryEx(string lpFileName, IntPtr hFile, LoadLibraryFlags dwFlags);
-
-            [DllImport("kernel32.dll", SetLastError = true)]
-            internal static extern bool FreeLibrary(IntPtr hModule);
-
-            [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-            internal static extern bool EnumResourceNames(IntPtr hModule, IntPtr lpszType, EnumResNameProc lpEnumFunc, IntPtr lParam);
-
-            [DllImport("kernel32.dll", SetLastError = true)]
-            internal static extern IntPtr FindResource(IntPtr hModule, IntPtr lpName, IntPtr lpType);
-
-            [DllImport("kernel32.dll", SetLastError = true)]
-            internal static extern IntPtr LoadResource(IntPtr hModule, IntPtr hResInfo);
-
-            [DllImport("kernel32.dll", SetLastError = true)]
-            internal static extern IntPtr LockResource(IntPtr hResData);
-
-            [DllImport("kernel32.dll", SetLastError = true)]
-            internal static extern uint SizeofResource(IntPtr hModule, IntPtr hResInfo);
-
-            internal static byte[] LoadResourceData(IntPtr hModule, IntPtr lpType, IntPtr lpName)
-            {
-                var resourceInfo = FindResource(hModule, lpName, lpType);
-                if (resourceInfo == IntPtr.Zero)
-                {
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "无法定位资源。");
-                }
-
-                var size = SizeofResource(hModule, resourceInfo);
-                if (size == 0)
-                {
-                    throw new InvalidOperationException("资源大小为0。");
-                }
-
-                var resourceHandle = LoadResource(hModule, resourceInfo);
-                if (resourceHandle == IntPtr.Zero)
-                {
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "无法加载资源。");
-                }
-
-                var lockedResource = LockResource(resourceHandle);
-                if (lockedResource == IntPtr.Zero)
-                {
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "无法锁定资源。");
-                }
-
-                var length = checked((int)size);
-                var buffer = new byte[length];
-                Marshal.Copy(lockedResource, buffer, 0, length);
-                return buffer;
-            }
         }
     }
 }
