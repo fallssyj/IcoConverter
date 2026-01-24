@@ -62,9 +62,8 @@
 
     </hc:Window.NonClientAreaContent>
     <hc:Window.Resources>
-        <!--  转换器  -->
-        <utils:CornerQualityConverter x:Key="CornerQualityConverter" />
         <utils:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <utils:MaskShapeConverter x:Key="MaskShapeConverter" />
 
     </hc:Window.Resources>
     <Border>
@@ -114,24 +113,6 @@
                             </StackPanel>
                         </Button>
 
-                        <Button
-                            Width="110"
-                            Height="40"
-                            Margin="5,0,0,0"
-                            Command="{Binding ApplyCornerRadiusCommand}">
-                            <StackPanel Orientation="Horizontal">
-                                <Path
-                                    Width="20"
-                                    Height="20"
-                                    Data="{StaticResource JournalCheck}"
-                                    Fill="{DynamicResource PrimaryTextBrush}"
-                                    Stretch="Uniform" />
-                                <TextBlock
-                                    Margin="5,0,0,0"
-                                    VerticalAlignment="Center"
-                                    Text="应用圆角" />
-                            </StackPanel>
-                        </Button>
 
                         <Button
                             Width="110"
@@ -253,6 +234,7 @@
                 <ScrollViewer
                     Grid.Column="1"
                     MinWidth="320"
+                    Padding="10"
                     HorizontalScrollBarVisibility="Disabled"
                     VerticalScrollBarVisibility="Visible">
                     <StackPanel>
@@ -263,25 +245,43 @@
                             Text="设置" />
                         <Separator Margin="0,0,0,10" />
 
-                        <!--  圆角设置 - 使用Card样式  -->
-                        <Border Margin="0,0,0,10" Padding="16">
-                            <StackPanel>
-                                <TextBlock Margin="0,0,0,10" Text="圆角设置" />
-                                <Grid>
+                        <!--  蒙版设置  -->
+                        <Expander
+                            Margin="0,0,0,10"
+                            Header="蒙版设置"
+                            IsExpanded="{Binding IsMaskSettingsExpanded}">
+                            <StackPanel Margin="10,5,0,0">
+                                <CheckBox
+                                    Margin="0,0,0,8"
+                                    Content="启用实时预览（大图可关闭提升性能）"
+                                    IsChecked="{Binding IsRealTimePreviewEnabled}"
+                                    ToolTip="关闭实时预览后，调整参数不会立即渲染，需手动点击 '应用蒙版'。" />
+
+                                <Grid Margin="0,5,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="60" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-
                                     <TextBlock
                                         Grid.Column="0"
                                         VerticalAlignment="Center"
-                                        Text="半径:" />
-                                    <TextBox Grid.Column="1" Margin="5,0">
+                                        Text="圆角半径:" />
+                                    <Slider
+                                        x:Name="CornerRadiusSlider"
+                                        Grid.Column="1"
+                                        Margin="8,0,0,0"
+                                        VerticalAlignment="Center"
+                                        IsEnabled="{Binding IsCornerRadiusEnabled}"
+                                        IsSnapToTickEnabled="True"
+                                        Maximum="{Binding CornerRadiusMaximum}"
+                                        Minimum="0"
+                                        PreviewMouseWheel="CornerRadiusSlider_PreviewMouseWheel"
+                                        TickFrequency="4"
+                                        ToolTip="拖动或使用滚轮、按钮微调圆角半径"
+                                        Value="{Binding CornerRadius, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBox Grid.Column="2" Margin="3,0">
                                         <TextBox.Text>
                                             <Binding
                                                 NotifyOnValidationError="True"
@@ -289,22 +289,49 @@
                                                 UpdateSourceTrigger="PropertyChanged"
                                                 ValidatesOnExceptions="True">
                                                 <Binding.ValidationRules>
-                                                    <utils:IntRangeValidationRule Maximum="1024" Minimum="0" />
+                                                    <utils:IntRangeValidationRule Maximum="100000" Minimum="0" />
                                                 </Binding.ValidationRules>
                                             </Binding>
                                         </TextBox.Text>
                                     </TextBox>
-                                    <TextBlock
-                                        Grid.Column="2"
-                                        Margin="5,0,0,0"
-                                        VerticalAlignment="Center"
-                                        Text="PX" />
-                                    <TextBlock
+                                    <StackPanel
                                         Grid.Column="3"
-                                        Margin="10,0,0,0"
+                                        Margin="4,0,0,0"
+                                        Orientation="Vertical">
+                                        <RepeatButton
+                                            Width="28"
+                                            Height="22"
+                                            Margin="0,0,0,4"
+                                            Command="{Binding IncreaseCornerRadiusCommand}"
+                                            Content="+"
+                                            Delay="250"
+                                            Interval="80"
+                                            ToolTip="增加 5px 圆角半径" />
+                                        <RepeatButton
+                                            Width="28"
+                                            Height="22"
+                                            Command="{Binding DecreaseCornerRadiusCommand}"
+                                            Content="-"
+                                            Delay="250"
+                                            Interval="80"
+                                            ToolTip="减少 5px 圆角半径" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid Margin="0,5,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock
+                                        Grid.Column="0"
                                         VerticalAlignment="Center"
-                                        Text="DPI:" />
-                                    <TextBox Grid.Column="4" Margin="5,0">
+                                        Text="目标 DPI:" />
+                                    <TextBox
+                                        Grid.Column="1"
+                                        Margin="5,0"
+                                        ToolTip="统一输出 DPI。一般保持 96 即可，导出 Windows 图标更兼容。">
                                         <TextBox.Text>
                                             <Binding
                                                 NotifyOnValidationError="True"
@@ -317,45 +344,202 @@
                                             </Binding>
                                         </TextBox.Text>
                                     </TextBox>
-                                </Grid>
 
-                                <TextBlock Margin="0,10,0,0" Text="质量" />
+                                </Grid>
+                                <TextBlock
+                                    Margin="0,4,0,0"
+                                    FontSize="13"
+                                    Opacity="0.4"
+                                    Text="不确定时保持 96，系统默认 DPI" />
+
+                                <StackPanel Margin="0,12,0,0" Orientation="Horizontal">
+                                    <Button
+                                        Width="90"
+                                        Height="30"
+                                        Margin="0,0,10,0"
+                                        Command="{Binding UndoMaskCommand}"
+                                        Content="撤销"
+                                        ToolTip="Ctrl+Z 或点击此处撤销最近一次蒙版调整" />
+                                    <Button
+                                        Width="90"
+                                        Height="30"
+                                        Margin="0,0,10,0"
+                                        Command="{Binding RedoMaskCommand}"
+                                        Content="重做"
+                                        ToolTip="Ctrl+Y 恢复被撤销的蒙版调整" />
+                                    <Button
+                                        Width="110"
+                                        Height="30"
+                                        Command="{Binding ApplyCornerRadiusCommand}"
+                                        Content="应用蒙版"
+                                        ToolTip="关闭实时预览时，点击此处手动刷新结果" />
+                                </StackPanel>
+
+                                <TextBlock Margin="0,12,0,0" Text="蒙版形状" />
                                 <ComboBox
-                                    Margin="10,5,0,0"
-                                    VerticalAlignment="Center"
-                                    ItemsSource="{Binding CornerQualityOptions}"
-                                    SelectedItem="{Binding SelectedCornerQuality}">
+                                    Margin="0,4,0,0"
+                                    ItemsSource="{Binding MaskShapeOptions}"
+                                    SelectedItem="{Binding SelectedMaskShape}"
+                                    ToolTip="为图片选择圆角、圆形或正多边形蒙版">
                                     <ComboBox.ItemTemplate>
                                         <DataTemplate>
-                                            <TextBlock Text="{Binding Converter={StaticResource CornerQualityConverter}}" />
+                                            <TextBlock Text="{Binding Converter={StaticResource MaskShapeConverter}}" />
                                         </DataTemplate>
                                     </ComboBox.ItemTemplate>
                                 </ComboBox>
 
+                                <StackPanel Margin="0,8,0,0" Visibility="{Binding IsPolygonShapeSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <TextBlock Text="多边形边数" />
+                                    <TextBox Margin="0,4,0,0" ToolTip="输入 3-64 之间的整数，决定正多边形的边数">
+                                        <TextBox.Text>
+                                            <Binding
+                                                NotifyOnValidationError="True"
+                                                Path="PolygonSides"
+                                                UpdateSourceTrigger="PropertyChanged"
+                                                ValidatesOnExceptions="True">
+                                                <Binding.ValidationRules>
+                                                    <utils:IntRangeValidationRule Maximum="64" Minimum="3" />
+                                                </Binding.ValidationRules>
+                                            </Binding>
+                                        </TextBox.Text>
+                                    </TextBox>
+                                    <TextBlock Margin="0,12,0,0" Text="旋转角度 (°)" />
+                                    <Grid Margin="0,4,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="60" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Slider
+                                            x:Name="PolygonRotationSlider"
+                                            Grid.Column="0"
+                                            VerticalAlignment="Center"
+                                            IsSnapToTickEnabled="True"
+                                            Maximum="180"
+                                            Minimum="-180"
+                                            PreviewMouseWheel="PolygonRotationSlider_PreviewMouseWheel"
+                                            TickFrequency="5"
+                                            ToolTip="拖动或滚轮旋转正多边形"
+                                            Value="{Binding PolygonRotation, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBox Grid.Column="1" Margin="5,0,0,0">
+                                            <TextBox.Text>
+                                                <Binding
+                                                    NotifyOnValidationError="True"
+                                                    Path="PolygonRotation"
+                                                    UpdateSourceTrigger="PropertyChanged"
+                                                    ValidatesOnExceptions="True">
+                                                    <Binding.ValidationRules>
+                                                        <utils:DoubleRangeValidationRule Maximum="180" Minimum="-180" />
+                                                    </Binding.ValidationRules>
+                                                </Binding>
+                                            </TextBox.Text>
+                                        </TextBox>
+                                        <StackPanel
+                                            Grid.Column="2"
+                                            Margin="4,0,0,0"
+                                            Orientation="Vertical">
+                                            <RepeatButton
+                                                Width="28"
+                                                Height="22"
+                                                Margin="0,0,0,4"
+                                                Command="{Binding IncreasePolygonRotationCommand}"
+                                                Content="+"
+                                                Delay="250"
+                                                Interval="80"
+                                                ToolTip="顺时针旋转 5°" />
+                                            <RepeatButton
+                                                Width="28"
+                                                Height="22"
+                                                Command="{Binding DecreasePolygonRotationCommand}"
+                                                Content="-"
+                                                Delay="250"
+                                                Interval="80"
+                                                ToolTip="逆时针旋转 5°" />
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+
                             </StackPanel>
-                        </Border>
+                        </Expander>
+
+                        <Expander Margin="0,0,0,10" Header="蒙版记录">
+                            <StackPanel Margin="10,5,0,0">
+                                <TextBlock Opacity="0.7" Text="展示最近 20 条蒙版调整与预览记录。" />
+                                <ListBox
+                                    MaxHeight="150"
+                                    Margin="0,8,0,0"
+                                    ItemsSource="{Binding MaskHistory}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" TextWrapping="Wrap" />
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <TextBlock
+                                    Margin="0,4,0,0"
+                                    Opacity="0.5"
+                                    Text="暂无记录"
+                                    TextAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding MaskHistory.Count}" Value="0">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <Button
+                                    Width="100"
+                                    Height="28"
+                                    Margin="0,8,0,0"
+                                    HorizontalAlignment="Right"
+                                    Command="{Binding ClearMaskHistoryCommand}"
+                                    Content="清空记录" />
+                            </StackPanel>
+                        </Expander>
+
+                        <Expander
+                            Margin="0,5,0,10"
+                            Header="使用提示"
+                            IsExpanded="False">
+                            <StackPanel Margin="10,0,0,0">
+                                <TextBlock Text="- 拖放图片或 EXE/DLL 即可提取内置图标。" TextWrapping="Wrap" />
+                                <TextBlock
+                                    Margin="0,4,0,0"
+                                    Text="- 关闭实时预览可避免大图频繁渲染，调整完成后点击 &quot;应用蒙版&quot;。"
+                                    TextWrapping="Wrap" />
+                                <TextBlock
+                                    Margin="0,4,0,0"
+                                    Text="- 使用撤销/重做或鼠标滚轮快速微调蒙版参数。"
+                                    TextWrapping="Wrap" />
+                                <TextBlock
+                                    Margin="0,4,0,0"
+                                    Text="- ICO 分辨率建议至少保留 16px、32px、48px、256px 以兼容不同缩放。"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Expander>
 
                         <Separator Margin="0,0,0,10" />
 
                         <!--  ICO分辨率设置 - 使用Card样式  -->
-                        <Border Margin="0,0,0,10" Padding="16">
-                            <StackPanel>
-                                <TextBlock Margin="0,0,0,10" Text="ICO分辨率" />
-                                <ListBox
-                                    MaxHeight="200"
-                                    ItemsSource="{Binding AvailableResolutions}"
-                                    ScrollViewer.VerticalScrollBarVisibility="Auto">
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate DataType="models:IcoResolution">
-                                            <CheckBox
-                                                Margin="2"
-                                                Content="{Binding DisplayText}"
-                                                IsChecked="{Binding IsSelected}" />
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
-                            </StackPanel>
-                        </Border>
+                        <Expander Header="ICO分辨率" IsExpanded="{Binding IsIcoResolutionExpanded}">
+                            <ListBox
+                                MaxHeight="200"
+                                ItemsSource="{Binding AvailableResolutions}"
+                                ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="models:IcoResolution">
+                                        <CheckBox
+                                            Margin="2"
+                                            Content="{Binding DisplayText}"
+                                            IsChecked="{Binding IsSelected}" />
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Expander>
                         <Separator Margin="0,0,0,10" />
                         <!--  操作按钮  -->
                         <WrapPanel Margin="0,0,0,10" HorizontalAlignment="Center">
@@ -384,7 +568,8 @@
                 Grid.Row="1"
                 Margin="0,4,0,0"
                 ExpandDirection="Up"
-                Header="日志">
+                Header="日志"
+                IsExpanded="{Binding IsLogExpanded}">
                 <Border
                     Grid.Row="1"
                     Height="200"
