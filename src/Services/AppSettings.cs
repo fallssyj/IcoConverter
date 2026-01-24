@@ -22,5 +22,11 @@ namespace IcoConverter.Services
         public int LastPolygonSides { get; set; } = 6;
 
         public int LastCornerRadius { get; set; } = 20;
+
+        public double LastImageScale { get; set; } = 1d;
+
+        public double LastImageOffsetX { get; set; }
+
+        public double LastImageOffsetY { get; set; }
     }
 }
