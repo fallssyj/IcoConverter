@@ -1,6 +1,5 @@
 # IcoConverter - 图片转 ICO 工具
 
-![IcoConverter](https://raw.githubusercontent.com/fallssyj/IcoConverter/refs/heads/main/img/20260119-182223.png)
 
 <div align="center">
 
@@ -9,79 +8,56 @@
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)
 
-一个基于 WPF .NET 8 开发的图片转 ICO 工具，支持圆角处理、批量转换、SVG 导入、主题切换等功能。
+基于 .NET 8 / WPF 的桌面级 ICO 工具，圆角裁剪、批量转换、EXE 图标提取、ICO→PNG
 
 </div>
 
-### 🎨 核心功能
-- **高质量 ICO 转换**：支持 9 种标准分辨率 (16×16 到 256×256)
-- **ICO转PNG**：自动识别 ICO 内包含的所有分辨率按需导出指定尺寸的PNG
-- **智能圆角处理**：可调节圆角半径和三种质量级别
-- **批量处理**：支持多图片批量转换为 ICO
-- **实时预览**：编辑效果实时可见，所见即所得
-- **SVG 支持**：自动识别并渲染 SVG
-- **主题切换**：浅色/深色主题一键切换
 
-### 🖼️ 图像处理
-- **圆角自定义**：0-1024px 可调圆角半径
-- **质量分级**：低/中/高三档圆角质量
-- **DPI 标准化**：自动统一图像 DPI（可调整）
-- **格式支持**：JPG、PNG、BMP、GIF、TIFF、SVG、ICO、EXE
+### 多源输入
+- 拖放或对话框加载 JPG/PNG/BMP/GIF/TIFF/SVG/ICO/EXE/DLL。
+- 自动统一 DPI，并在加载时根据最短边决定可用分辨率。
+- 默认导出ICO分辨率 16×16~256×256
+- 源图满足条件时自动解锁 512×512 与 1024×1024，并以 PNG 负载写入 ICO。
+- 一键导出当前预览 PNG
+- 批量任务支持多图排队处理，输出目录自定义。
+- ICO转PNG(导出ICO包含的所有分辨率)
+- EXE/DLL 资源ICO提取并扫描同名 .mui/.mun 卫星资源，列出所有图标组合
 
-## 🧰 开发环境
+### 蒙版
+- 支持圆角矩形、正圆与多边形三种蒙版，半径 0-1024px、边数 3-64、旋转 -180°~180° 可调。
+- SkiaSharp 蒙版渲染，透明背景填充。
+- 实时预览支持延迟防抖、可按需关闭并改为手动应用。
+- 内置撤销/重做栈与历史记录，方便比较不同参数。
 
-- 🪟 **Windows 11 25H2**
-- 🧑‍💻 **Visual Studio 2026**
-- 🧷 **.NET 8.0 SDK**
 
-## 🚀 使用方式
+### 开发环境
+- Windows 11 25H2
+- Visual Studio 2026
+- [.NET 8.0 SDK](https://dotnet.microsoft.com/download)
 
-### 图形界面
-1. 运行 `IcoConverter.exe`
-2. 加载图片（按钮或拖放）
-3. 设置圆角、分辨率
-4. 预览后导出 ICO、PNG
-
-### 批量转换
-1. 点击“批量转换”
-2. 选择多张图片
-3. 指定输出文件夹
-
-### 命令行
-```bash
-IcoConverter.exe "C:\path\to\image.png"
-```
-
-## 🗂️ 项目结构
-
-```
-IcoConverter/
-├── README.md
-└── src/
-    ├── Assets/        # 资源文件
-    ├── Models/        # 数据模型
-    ├── Services/      # 图像处理
-    ├── ViewModels/    # ViewModels
-    ├── Utils/         # 命令与工具
-    ├── Styles/        # 主题与图标资源
-    ├── MainWindow.xaml
-    ├── IcoToPngWindow.xaml
-    ├── AboutWindow.xaml
-    └── App.xaml
-```
-
-## 🔧 构建与运行
+### 构建发布
 
 ```bash
-dotnet build src/IcoConverter.sln --configuration Release
+dotnet restore src/IcoConverter.sln
+dotnet build src/IcoConverter.sln -c Release
+# 可选：使用 PowerShell 脚本
+pwsh ./build.ps1
+```
+
+### 调试运行
+```bash
 dotnet run --project src/IcoConverter.csproj
 ```
 
-## 🙏 致谢
+### 快速开始
+1. 运行 `IcoConverter.exe`，拖放或选择一张图片/ICO/EXE。
+2. 根据需要选择蒙版形状、圆角、边数、旋转，必要时关闭实时预览并手动点“应用蒙版”。
+3. 在分辨率面板勾选需要的尺寸（若源图够大，可解锁 512/1024）。
+4. 点击“导出 ICO”并选择保存路径；也可用“导出 PNG”导出当前预览。
 
-- MiSans
-- HandyControl
-- Microsoft.Extensions.DependencyInjection
-- System.Drawing.Common
-- SkiaSharp
-- Svg.Skia
+
+## 依赖组件
+- [HandyControl 3.5.1](https://github.com/HandyOrg/HandyControl)
+- [Microsoft.Extensions.DependencyInjection 10.0.2](https://learn.microsoft.com/dotnet/core/extensions/dependency-injection)
+- [SkiaSharp 3.119.1](https://github.com/mono/SkiaSharp)
+- [Svg.Skia 3.4.1](https://github.com/wieslawsoltes/Svg.Skia)
