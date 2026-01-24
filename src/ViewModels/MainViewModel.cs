@@ -53,6 +53,13 @@ namespace IcoConverter.ViewModels
         private MaskShape _lastProcessedShape = MaskShape.RoundedRectangle;
         private int _lastProcessedPolygonSides = 6;
         private double _lastProcessedPolygonRotation = double.NaN;
+        private double _lastImageScale = double.NaN;
+        private double _lastImageOffsetX = double.NaN;
+        private double _lastImageOffsetY = double.NaN;
+        private double _imageScale = 1d;
+        private double _imageOffsetX;
+        private double _imageOffsetY;
+        private double _imageOffsetLimit = DefaultImageOffsetLimit;
         private readonly DispatcherTimer _previewDebounceTimer;
         private static readonly (int Width, int Height)[] DefaultIcoResolutions = new[]
         {
@@ -76,6 +83,9 @@ namespace IcoConverter.ViewModels
         private const int MinimumCornerRadiusMaximum = 32;
         private const int RecommendedCornerRadiusHint = 96;
         private const int AutoPreviewDisableThreshold = 2048;
+        private const double MinImageScale = 0.1d;
+        private const double MaxImageScale = 4d;
+        private const double DefaultImageOffsetLimit = 2048d;
         // SVG 渲染的最大边长（像素），用于保证输出清晰度
         private const int SvgRenderMaxSize = 1024;
         // 统一图像 DPI 的目标值（可调整）
@@ -257,9 +267,76 @@ namespace IcoConverter.ViewModels
             }
         }
 
-        public bool IsCornerRadiusEnabled => SelectedMaskShape == MaskShape.RoundedRectangle || SelectedMaskShape == MaskShape.Circle;
+        public bool IsCornerRadiusEnabled => SelectedMaskShape == MaskShape.RoundedRectangle
+            || SelectedMaskShape == MaskShape.Circle
+            || SelectedMaskShape == MaskShape.Polygon;
 
         public bool IsPolygonShapeSelected => SelectedMaskShape == MaskShape.Polygon;
+
+        public double ImageScale
+        {
+            get => _imageScale;
+            set
+            {
+                var snapshot = CreateMaskStateSnapshot();
+                var clamped = Math.Clamp(value, MinImageScale, MaxImageScale);
+                if (SetField(ref _imageScale, clamped))
+                {
+                    RegisterUndoSnapshot(snapshot);
+                    SaveSettings();
+                    SchedulePreviewUpdate();
+                }
+            }
+        }
+
+        public double ImageOffsetX
+        {
+            get => _imageOffsetX;
+            set
+            {
+                var snapshot = CreateMaskStateSnapshot();
+                var clamped = Math.Clamp(value, ImageOffsetMinimum, ImageOffsetMaximum);
+                if (SetField(ref _imageOffsetX, clamped))
+                {
+                    RegisterUndoSnapshot(snapshot);
+                    SaveSettings();
+                    SchedulePreviewUpdate();
+                }
+            }
+        }
+
+        public double ImageOffsetY
+        {
+            get => _imageOffsetY;
+            set
+            {
+                var snapshot = CreateMaskStateSnapshot();
+                var clamped = Math.Clamp(value, ImageOffsetMinimum, ImageOffsetMaximum);
+                if (SetField(ref _imageOffsetY, clamped))
+                {
+                    RegisterUndoSnapshot(snapshot);
+                    SaveSettings();
+                    SchedulePreviewUpdate();
+                }
+            }
+        }
+
+        public double ImageOffsetLimit
+        {
+            get => _imageOffsetLimit;
+            private set
+            {
+                if (SetField(ref _imageOffsetLimit, value))
+                {
+                    OnPropertyChanged(nameof(ImageOffsetMinimum));
+                    OnPropertyChanged(nameof(ImageOffsetMaximum));
+                }
+            }
+        }
+
+        public double ImageOffsetMinimum => -ImageOffsetLimit;
+
+        public double ImageOffsetMaximum => ImageOffsetLimit;
 
         public int PolygonSides
         {
@@ -677,7 +754,7 @@ namespace IcoConverter.ViewModels
                 var maxRadius = Math.Max(0, Math.Min(_originalImage.PixelWidth, _originalImage.PixelHeight) / 2);
                 var radius = Math.Clamp(CornerRadius, 0, maxRadius);
 
-                if (shape == MaskShape.Circle && radius == 0)
+                if ((shape == MaskShape.Circle || shape == MaskShape.Polygon) && radius == 0)
                 {
                     radius = maxRadius;
                 }
@@ -688,12 +765,17 @@ namespace IcoConverter.ViewModels
                     AddLog($"圆角半径已调整为 {radius}px（受图片尺寸限制）。");
                 }
 
+                var transformOptions = new ImageTransformOptions(ImageScale, ImageOffsetX, ImageOffsetY);
+
                 if (_lastProcessedSource == _originalImage &&
                     _lastProcessedImage != null &&
                     _lastProcessedRadius == radius &&
                     _lastProcessedShape == shape &&
                     _lastProcessedPolygonSides == polygonSides &&
-                    Math.Abs(_lastProcessedPolygonRotation - polygonRotation) < 0.0001)
+                    Math.Abs(_lastProcessedPolygonRotation - polygonRotation) < 0.0001 &&
+                    Math.Abs(_lastImageScale - transformOptions.Scale) < 0.0001 &&
+                    Math.Abs(_lastImageOffsetX - transformOptions.OffsetX) < 0.01 &&
+                    Math.Abs(_lastImageOffsetY - transformOptions.OffsetY) < 0.01)
                 {
                     PreviewImage = _lastProcessedImage;
                     AddLog("蒙版参数未变化，已复用缓存预览。");
@@ -707,7 +789,9 @@ namespace IcoConverter.ViewModels
                     _ => true
                 };
 
-                if (!requiresMask)
+                var requiresProcessing = requiresMask || !transformOptions.IsIdentity;
+
+                if (!requiresProcessing)
                 {
                     PreviewImage = _originalImage;
                     AddLog("当前蒙版配置无需裁剪，已使用原图预览。");
@@ -717,10 +801,24 @@ namespace IcoConverter.ViewModels
                     _lastProcessedShape = shape;
                     _lastProcessedPolygonSides = polygonSides;
                     _lastProcessedPolygonRotation = polygonRotation;
+                    _lastImageScale = transformOptions.Scale;
+                    _lastImageOffsetX = transformOptions.OffsetX;
+                    _lastImageOffsetY = transformOptions.OffsetY;
                     return;
                 }
 
-                AddLog($"应用蒙版: {shape}，半径 {radius}px");
+                if (requiresMask && !transformOptions.IsIdentity)
+                {
+                    AddLog($"应用蒙版与图像变换: {shape}，半径 {radius}px，缩放 {transformOptions.Scale:0.##}x，偏移 ({transformOptions.OffsetX:0.#}, {transformOptions.OffsetY:0.#})px");
+                }
+                else if (requiresMask)
+                {
+                    AddLog($"应用蒙版: {shape}，半径 {radius}px");
+                }
+                else
+                {
+                    AddLog($"应用图像变换: 缩放 {transformOptions.Scale:0.##}x，偏移 ({transformOptions.OffsetX:0.#}, {transformOptions.OffsetY:0.#})px");
+                }
 
                 var stopwatch = Stopwatch.StartNew();
 
@@ -737,7 +835,8 @@ namespace IcoConverter.ViewModels
                     shape,
                     radius,
                     polygonSides,
-                    polygonRotation));
+                    polygonRotation,
+                    transformOptions));
 
                 stopwatch.Stop();
 
@@ -748,6 +847,9 @@ namespace IcoConverter.ViewModels
                 _lastProcessedShape = shape;
                 _lastProcessedPolygonSides = polygonSides;
                 _lastProcessedPolygonRotation = polygonRotation;
+                _lastImageScale = transformOptions.Scale;
+                _lastImageOffsetX = transformOptions.OffsetX;
+                _lastImageOffsetY = transformOptions.OffsetY;
                 AddLog($"蒙版应用完成，耗时 {stopwatch.ElapsedMilliseconds}ms，输出 {processedImage.PixelWidth}x{processedImage.PixelHeight}");
                 AddHistoryEntry($"预览完成 - {DescribeMaskState(CreateMaskStateSnapshot())}");
             }
@@ -985,6 +1087,8 @@ namespace IcoConverter.ViewModels
                 ImagePath = filePath;
                 UpdateCornerRadiusMaximum(normalizedBitmap);
                 UpdateHighResolutionOptions(normalizedBitmap);
+                ResetImageTransform();
+                UpdateImageTransformLimits(normalizedBitmap);
 
 
                 _lastProcessedSource = null;
@@ -993,6 +1097,9 @@ namespace IcoConverter.ViewModels
                 _lastProcessedShape = MaskShape.RoundedRectangle;
                 _lastProcessedPolygonSides = -1;
                 _lastProcessedPolygonRotation = double.NaN;
+                _lastImageScale = double.NaN;
+                _lastImageOffsetX = double.NaN;
+                _lastImageOffsetY = double.NaN;
                 _pendingPreviewUpdate = false;
                 _previewDebounceTimer.Stop();
                 ResetHistory();
@@ -1009,7 +1116,8 @@ namespace IcoConverter.ViewModels
                     AddLog($"图片较大（最长边 {largestDimension}px），已自动关闭实时预览。");
                 }
 
-                bool shouldAutoApply = SelectedMaskShape switch
+                var currentTransform = new ImageTransformOptions(ImageScale, ImageOffsetX, ImageOffsetY);
+                bool shouldAutoApply = !currentTransform.IsIdentity || SelectedMaskShape switch
                 {
                     MaskShape.RoundedRectangle => CornerRadius > 0,
                     MaskShape.Circle => true,
@@ -1051,6 +1159,13 @@ namespace IcoConverter.ViewModels
             _cornerRadius = Math.Max(0, _settings.LastCornerRadius);
             _polygonSides = Math.Clamp(_settings.LastPolygonSides, 3, 64);
             _polygonRotation = Math.Clamp(_settings.LastPolygonRotation, -180d, 180d);
+            _imageScale = Math.Clamp(_settings.LastImageScale <= 0 ? 1d : _settings.LastImageScale, MinImageScale, MaxImageScale);
+            _imageOffsetX = _settings.LastImageOffsetX;
+            _imageOffsetY = _settings.LastImageOffsetY;
+
+            OnPropertyChanged(nameof(ImageScale));
+            OnPropertyChanged(nameof(ImageOffsetX));
+            OnPropertyChanged(nameof(ImageOffsetY));
         }
 
         private void SaveSettings()
@@ -1064,6 +1179,9 @@ namespace IcoConverter.ViewModels
             _settings.LastCornerRadius = _cornerRadius;
             _settings.LastPolygonSides = _polygonSides;
             _settings.LastPolygonRotation = _polygonRotation;
+            _settings.LastImageScale = _imageScale;
+            _settings.LastImageOffsetX = _imageOffsetX;
+            _settings.LastImageOffsetY = _imageOffsetY;
             _settingsService.Save(_settings);
         }
 
@@ -1244,7 +1362,56 @@ namespace IcoConverter.ViewModels
             }
         }
 
-        private MaskStateSnapshot CreateMaskStateSnapshot() => new(CornerRadius, SelectedMaskShape, PolygonSides, Math.Round(PolygonRotation, 3));
+        private void UpdateImageTransformLimits(BitmapSource? source)
+        {
+            double limit = DefaultImageOffsetLimit;
+
+            if (source != null)
+            {
+                limit = Math.Max(source.PixelWidth, source.PixelHeight);
+            }
+
+            ImageOffsetLimit = limit;
+            ClampImageOffsets();
+        }
+
+        private void ClampImageOffsets()
+        {
+            var clampedX = Math.Clamp(ImageOffsetX, ImageOffsetMinimum, ImageOffsetMaximum);
+            var clampedY = Math.Clamp(ImageOffsetY, ImageOffsetMinimum, ImageOffsetMaximum);
+
+            if (Math.Abs(clampedX - ImageOffsetX) > 0.0001)
+            {
+                _suspendUndoCapture = true;
+                ImageOffsetX = clampedX;
+                _suspendUndoCapture = false;
+            }
+
+            if (Math.Abs(clampedY - ImageOffsetY) > 0.0001)
+            {
+                _suspendUndoCapture = true;
+                ImageOffsetY = clampedY;
+                _suspendUndoCapture = false;
+            }
+        }
+
+        private void ResetImageTransform()
+        {
+            _suspendUndoCapture = true;
+            ImageScale = 1d;
+            ImageOffsetX = 0d;
+            ImageOffsetY = 0d;
+            _suspendUndoCapture = false;
+        }
+
+        private MaskStateSnapshot CreateMaskStateSnapshot() => new(
+            CornerRadius,
+            SelectedMaskShape,
+            PolygonSides,
+            Math.Round(PolygonRotation, 3),
+            Math.Round(ImageScale, 4),
+            Math.Round(ImageOffsetX, 2),
+            Math.Round(ImageOffsetY, 2));
 
         private void RegisterUndoSnapshot(MaskStateSnapshot snapshot)
         {
@@ -1273,6 +1440,9 @@ namespace IcoConverter.ViewModels
                 SelectedMaskShape = snapshot.Shape;
                 PolygonSides = snapshot.PolygonSides;
                 PolygonRotation = snapshot.PolygonRotation;
+                ImageScale = snapshot.ImageScale;
+                ImageOffsetX = snapshot.ImageOffsetX;
+                ImageOffsetY = snapshot.ImageOffsetY;
             }
             finally
             {
@@ -1313,7 +1483,7 @@ namespace IcoConverter.ViewModels
         }
 
         private string DescribeMaskState(MaskStateSnapshot snapshot)
-            => $"{snapshot.Shape} · R={snapshot.CornerRadius}px · 边={snapshot.PolygonSides} · 旋转={snapshot.PolygonRotation:0.#}°";
+            => $"{snapshot.Shape} · R={snapshot.CornerRadius}px · 边={snapshot.PolygonSides} · 旋转={snapshot.PolygonRotation:0.#}° · 缩放={snapshot.ImageScale:0.##}x · X={snapshot.ImageOffsetX:0.#}px · Y={snapshot.ImageOffsetY:0.#}px";
 
         private void AddHistoryEntry(string message)
         {
@@ -1363,7 +1533,14 @@ namespace IcoConverter.ViewModels
             CustomMessageBox.Show(message, "提示", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
-        private readonly record struct MaskStateSnapshot(int CornerRadius, MaskShape Shape, int PolygonSides, double PolygonRotation);
+        private readonly record struct MaskStateSnapshot(
+            int CornerRadius,
+            MaskShape Shape,
+            int PolygonSides,
+            double PolygonRotation,
+            double ImageScale,
+            double ImageOffsetX,
+            double ImageOffsetY);
 
         /// <summary>
         /// 接收日志服务的更新并刷新 UI。
