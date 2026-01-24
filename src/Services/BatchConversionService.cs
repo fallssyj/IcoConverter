@@ -1,6 +1,6 @@
-using IcoConverter.ViewModels;
 using System.Drawing;
 using System.IO;
+using IcoConverter.Models;
 
 namespace IcoConverter.Services
 {
@@ -28,7 +28,9 @@ namespace IcoConverter.Services
             string outputFolder,
             List<Size> resolutions,
             int cornerRadius,
-            CornerQuality quality,
+            MaskShape maskShape,
+            int polygonSides,
+            double polygonRotationDegrees,
             double targetDpi,
             int svgRenderMaxSize,
             CancellationToken cancellationToken,
@@ -60,10 +62,28 @@ namespace IcoConverter.Services
 
                     var maxRadius = Math.Max(0, Math.Min(normalizedBitmap.PixelWidth, normalizedBitmap.PixelHeight) / 2);
                     var radius = Math.Clamp(cornerRadius, 0, maxRadius);
-
-                    if (radius > 0)
+                    if (maskShape == MaskShape.Circle && radius == 0)
                     {
-                        imageToConvert = await Task.Run(() => _imageProcessor.ApplyRoundedCorners(normalizedBitmap, radius, quality));
+                        radius = maxRadius;
+                    }
+
+                    var safePolygonSides = Math.Max(3, polygonSides);
+                    var shouldApplyMask = maskShape switch
+                    {
+                        MaskShape.RoundedRectangle => radius > 0,
+                        MaskShape.Circle => radius > 0,
+                        _ => true
+                    };
+
+                    if (shouldApplyMask)
+                    {
+                        var capturedRadius = radius;
+                        imageToConvert = await Task.Run(() => _imageProcessor.ApplyMask(
+                            normalizedBitmap,
+                            maskShape,
+                            capturedRadius,
+                            safePolygonSides,
+                            polygonRotationDegrees));
                     }
 
                     var outputName = Path.GetFileNameWithoutExtension(filePath) + ".ico";
