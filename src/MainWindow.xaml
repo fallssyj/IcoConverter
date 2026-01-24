@@ -254,8 +254,7 @@
                                 <CheckBox
                                     Margin="0,0,0,8"
                                     Content="启用实时预览（大图可关闭提升性能）"
-                                    IsChecked="{Binding IsRealTimePreviewEnabled}"
-                                    ToolTip="关闭实时预览后，调整参数不会立即渲染，需手动点击 '应用蒙版'。" />
+                                    IsChecked="{Binding IsRealTimePreviewEnabled}" />
 
                                 <Grid Margin="0,5,0,0">
                                     <Grid.ColumnDefinitions>
@@ -279,7 +278,6 @@
                                         Minimum="0"
                                         PreviewMouseWheel="CornerRadiusSlider_PreviewMouseWheel"
                                         TickFrequency="4"
-                                        ToolTip="拖动或使用滚轮、按钮微调圆角半径"
                                         Value="{Binding CornerRadius, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                     <TextBox Grid.Column="2" Margin="3,0">
                                         <TextBox.Text>
@@ -305,16 +303,14 @@
                                             Command="{Binding IncreaseCornerRadiusCommand}"
                                             Content="+"
                                             Delay="250"
-                                            Interval="80"
-                                            ToolTip="增加 5px 圆角半径" />
+                                            Interval="80" />
                                         <RepeatButton
                                             Width="28"
                                             Height="22"
                                             Command="{Binding DecreaseCornerRadiusCommand}"
                                             Content="-"
                                             Delay="250"
-                                            Interval="80"
-                                            ToolTip="减少 5px 圆角半径" />
+                                            Interval="80" />
                                     </StackPanel>
                                 </Grid>
 
@@ -328,10 +324,7 @@
                                         Grid.Column="0"
                                         VerticalAlignment="Center"
                                         Text="目标 DPI:" />
-                                    <TextBox
-                                        Grid.Column="1"
-                                        Margin="5,0"
-                                        ToolTip="统一输出 DPI。一般保持 96 即可，导出 Windows 图标更兼容。">
+                                    <TextBox Grid.Column="1" Margin="5,0">
                                         <TextBox.Text>
                                             <Binding
                                                 NotifyOnValidationError="True"
@@ -358,29 +351,25 @@
                                         Height="30"
                                         Margin="0,0,10,0"
                                         Command="{Binding UndoMaskCommand}"
-                                        Content="撤销"
-                                        ToolTip="Ctrl+Z 或点击此处撤销最近一次蒙版调整" />
+                                        Content="撤销" />
                                     <Button
                                         Width="90"
                                         Height="30"
                                         Margin="0,0,10,0"
                                         Command="{Binding RedoMaskCommand}"
-                                        Content="重做"
-                                        ToolTip="Ctrl+Y 恢复被撤销的蒙版调整" />
+                                        Content="重做" />
                                     <Button
                                         Width="110"
                                         Height="30"
                                         Command="{Binding ApplyCornerRadiusCommand}"
-                                        Content="应用蒙版"
-                                        ToolTip="关闭实时预览时，点击此处手动刷新结果" />
+                                        Content="应用蒙版" />
                                 </StackPanel>
 
                                 <TextBlock Margin="0,12,0,0" Text="蒙版形状" />
                                 <ComboBox
                                     Margin="0,4,0,0"
                                     ItemsSource="{Binding MaskShapeOptions}"
-                                    SelectedItem="{Binding SelectedMaskShape}"
-                                    ToolTip="为图片选择圆角、圆形或正多边形蒙版">
+                                    SelectedItem="{Binding SelectedMaskShape}">
                                     <ComboBox.ItemTemplate>
                                         <DataTemplate>
                                             <TextBlock Text="{Binding Converter={StaticResource MaskShapeConverter}}" />
@@ -390,7 +379,7 @@
 
                                 <StackPanel Margin="0,8,0,0" Visibility="{Binding IsPolygonShapeSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <TextBlock Text="多边形边数" />
-                                    <TextBox Margin="0,4,0,0" ToolTip="输入 3-64 之间的整数，决定正多边形的边数">
+                                    <TextBox Margin="0,4,0,0">
                                         <TextBox.Text>
                                             <Binding
                                                 NotifyOnValidationError="True"
@@ -419,7 +408,6 @@
                                             Minimum="-180"
                                             PreviewMouseWheel="PolygonRotationSlider_PreviewMouseWheel"
                                             TickFrequency="5"
-                                            ToolTip="拖动或滚轮旋转正多边形"
                                             Value="{Binding PolygonRotation, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                         <TextBox Grid.Column="1" Margin="5,0,0,0">
                                             <TextBox.Text>
@@ -445,16 +433,14 @@
                                                 Command="{Binding IncreasePolygonRotationCommand}"
                                                 Content="+"
                                                 Delay="250"
-                                                Interval="80"
-                                                ToolTip="顺时针旋转 5°" />
+                                                Interval="80" />
                                             <RepeatButton
                                                 Width="28"
                                                 Height="22"
                                                 Command="{Binding DecreasePolygonRotationCommand}"
                                                 Content="-"
                                                 Delay="250"
-                                                Interval="80"
-                                                ToolTip="逆时针旋转 5°" />
+                                                Interval="80" />
                                         </StackPanel>
                                     </Grid>
                                 </StackPanel>
