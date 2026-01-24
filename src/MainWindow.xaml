@@ -461,6 +461,8 @@
 
                             </StackPanel>
                         </Expander>
+                        <Separator Margin="0,0,0,10" />
+
                         <!--  蒙版记录  -->
                         <Expander Margin="0,0,0,10" Header="蒙版记录">
                             <StackPanel Margin="10,5,0,0">
@@ -500,6 +502,8 @@
                                     Content="清空记录" />
                             </StackPanel>
                         </Expander>
+                        <Separator Margin="0,0,0,10" />
+
                         <!--  使用提示  -->
                         <Expander
                             Margin="0,5,0,10"
