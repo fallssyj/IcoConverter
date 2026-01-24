@@ -1,5 +1,5 @@
-using IcoConverter.ViewModels;
 using System.Drawing;
+using IcoConverter.Models;
 
 namespace IcoConverter.Services
 {
@@ -16,7 +16,9 @@ namespace IcoConverter.Services
             string outputFolder,
             List<Size> resolutions,
             int cornerRadius,
-            CornerQuality quality,
+            MaskShape maskShape,
+            int polygonSides,
+            double polygonRotationDegrees,
             double targetDpi,
             int svgRenderMaxSize,
             CancellationToken cancellationToken,
