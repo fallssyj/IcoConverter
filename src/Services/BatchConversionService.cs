@@ -83,7 +83,8 @@ namespace IcoConverter.Services
                             maskShape,
                             capturedRadius,
                             safePolygonSides,
-                            polygonRotationDegrees));
+                            polygonRotationDegrees,
+                            ImageTransformOptions.Identity));
                     }
 
                     var outputName = Path.GetFileNameWithoutExtension(filePath) + ".ico";
