@@ -2,11 +2,15 @@ using IcoConverter.Models;
 using IcoConverter.Services;
 using IcoConverter.Utils;
 using Microsoft.Extensions.DependencyInjection;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using WinForms = System.Windows.Forms;
 
 namespace IcoConverter.ViewModels
@@ -33,7 +37,7 @@ namespace IcoConverter.ViewModels
         private BitmapSource? _previewImage;
         private BitmapSource? _originalImage;
         private int _cornerRadius = 20;
-        private CornerQuality _selectedCornerQuality = CornerQuality.High;
+        private int _cornerRadiusMaximum = DefaultCornerRadiusMaximum;
         private string _logText = string.Empty;
         private bool _isProcessing = false;
         private System.Threading.CancellationTokenSource? _cts;
@@ -43,11 +47,48 @@ namespace IcoConverter.ViewModels
         private BitmapSource? _lastProcessedSource;
         private BitmapSource? _lastProcessedImage;
         private int _lastProcessedRadius = -1;
-        private CornerQuality _lastProcessedQuality = CornerQuality.High;
+        private MaskShape _selectedMaskShape = MaskShape.RoundedRectangle;
+        private int _polygonSides = 6;
+        private double _polygonRotation;
+        private MaskShape _lastProcessedShape = MaskShape.RoundedRectangle;
+        private int _lastProcessedPolygonSides = 6;
+        private double _lastProcessedPolygonRotation = double.NaN;
+        private readonly DispatcherTimer _previewDebounceTimer;
+        private static readonly (int Width, int Height)[] DefaultIcoResolutions = new[]
+        {
+            (16, 16),
+            (24, 24),
+            (32, 32),
+            (48, 48),
+            (64, 64),
+            (72, 72),
+            (96, 96),
+            (128, 128),
+            (256, 256)
+        };
+        private static readonly (int Width, int Height)[] OptionalPngResolutions = new[]
+        {
+            (512, 512),
+            (1024, 1024)
+        };
+        private bool _pendingPreviewUpdate;
+        private const int DefaultCornerRadiusMaximum = 1024;
+        private const int MinimumCornerRadiusMaximum = 32;
+        private const int RecommendedCornerRadiusHint = 96;
+        private const int AutoPreviewDisableThreshold = 2048;
         // SVG 渲染的最大边长（像素），用于保证输出清晰度
         private const int SvgRenderMaxSize = 1024;
         // 统一图像 DPI 的目标值（可调整）
         private double _targetDpi = 96d;
+        private bool _isRealTimePreviewEnabled = true;
+        private bool _isMaskSettingsExpanded = true;
+        private bool _isIcoResolutionExpanded = true;
+        private bool _isLogExpanded;
+        private readonly Stack<MaskStateSnapshot> _undoStack = new();
+        private readonly Stack<MaskStateSnapshot> _redoStack = new();
+        private bool _suspendUndoCapture;
+        private bool _isRestoringState;
+        private bool _suppressPreviewToggleLog;
         private static readonly HashSet<string> ExecutableExtensions = new(StringComparer.OrdinalIgnoreCase) { ".exe", ".dll" };
         /// <summary>
         /// 切换浅色/深色主题的命令。
@@ -100,6 +141,13 @@ namespace IcoConverter.ViewModels
             BatchConvertCommand = new AsyncRelayCommand(BatchConvertAsync, CanBatchConvert);
             CancelCommand = new RelayCommand(CancelProcessing, CanCancelProcessing);
             ClearLogCommand = new RelayCommand(ClearLog);
+            UndoMaskCommand = new RelayCommand(_ => UndoMaskChanges(), _ => CanUndoMask);
+            RedoMaskCommand = new RelayCommand(_ => RedoMaskChanges(), _ => CanRedoMask);
+            IncreaseCornerRadiusCommand = new RelayCommand(_ => AdjustCornerRadius(5));
+            DecreaseCornerRadiusCommand = new RelayCommand(_ => AdjustCornerRadius(-5));
+            IncreasePolygonRotationCommand = new RelayCommand(_ => AdjustPolygonRotation(5));
+            DecreasePolygonRotationCommand = new RelayCommand(_ => AdjustPolygonRotation(-5));
+            ClearMaskHistoryCommand = new RelayCommand(_ => ResetHistory(), _ => MaskHistory.Count > 0);
             ChangeThemeCommand = new RelayCommand(ChangeTheme);
             OpenAboutCommand = new RelayCommand(_ => OpenAboutWindow());
             MinimizeCommand = new RelayCommand(_ => MinimizeWindow());
@@ -123,34 +171,29 @@ namespace IcoConverter.ViewModels
                 }
                 catch (Exception ex)
                 {
-                    CustomMessageBox.Show($"无法打开浏览器: {ex.Message}",
-                        "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    ReportError("无法打开浏览器", ex);
                 }
             });
             // 初始化可选分辨率列表
-            AvailableResolutions =
-            [
-                new IcoResolution(16, 16, true),
-                new IcoResolution(24, 24, true),
-                new IcoResolution(32, 32, true),
-                new IcoResolution(48, 48, true),
-                new IcoResolution(64, 64, true),
-                new IcoResolution(72, 72, true),
-                new IcoResolution(96, 96, true),
-                new IcoResolution(128, 128, true),
-                new IcoResolution(256, 256, true)
-            ];
+            AvailableResolutions = new ObservableCollection<IcoResolution>(
+                DefaultIcoResolutions
+                    .Select(size => new IcoResolution(size.Width, size.Height, true)));
 
-            // 初始化圆角质量选项
-            CornerQualityOptions =
-            [
-                CornerQuality.Low,
-                CornerQuality.Medium,
-                CornerQuality.High
-            ];
+            MaskShapeOptions = new ObservableCollection<MaskShape>();
+            foreach (MaskShape shape in Enum.GetValues(typeof(MaskShape)))
+            {
+                MaskShapeOptions.Add(shape);
+            }
+
+            _previewDebounceTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(180)
+            };
+            _previewDebounceTimer.Tick += PreviewDebounceTimer_Tick;
 
             LoadSettings();
             ApplyTheme(_isDarkTheme);
+            UpdateHighResolutionOptions(null);
             CommandManager.InvalidateRequerySuggested();
 
             // 初始化日志显示
@@ -177,17 +220,76 @@ namespace IcoConverter.ViewModels
             set
             {
                 var safeValue = Math.Max(0, value);
-                SetField(ref _cornerRadius, safeValue);
+                if (CornerRadiusMaximum > 0)
+                {
+                    safeValue = Math.Min(safeValue, CornerRadiusMaximum);
+                }
+                var snapshot = CreateMaskStateSnapshot();
+                if (SetField(ref _cornerRadius, safeValue))
+                {
+                    RegisterUndoSnapshot(snapshot);
+                    SchedulePreviewUpdate();
+                }
             }
         }
 
-        public CornerQuality SelectedCornerQuality
+        public int CornerRadiusMaximum
         {
-            get => _selectedCornerQuality;
-            set => SetField(ref _selectedCornerQuality, value);
+            get => _cornerRadiusMaximum;
+            private set => SetField(ref _cornerRadiusMaximum, Math.Max(0, value));
         }
 
-        public ObservableCollection<CornerQuality> CornerQualityOptions { get; }
+        public ObservableCollection<MaskShape> MaskShapeOptions { get; }
+
+        public MaskShape SelectedMaskShape
+        {
+            get => _selectedMaskShape;
+            set
+            {
+                var snapshot = CreateMaskStateSnapshot();
+                if (SetField(ref _selectedMaskShape, value))
+                {
+                    RegisterUndoSnapshot(snapshot);
+                    OnPropertyChanged(nameof(IsCornerRadiusEnabled));
+                    OnPropertyChanged(nameof(IsPolygonShapeSelected));
+                    SchedulePreviewUpdate();
+                }
+            }
+        }
+
+        public bool IsCornerRadiusEnabled => SelectedMaskShape == MaskShape.RoundedRectangle || SelectedMaskShape == MaskShape.Circle;
+
+        public bool IsPolygonShapeSelected => SelectedMaskShape == MaskShape.Polygon;
+
+        public int PolygonSides
+        {
+            get => _polygonSides;
+            set
+            {
+                var safeValue = Math.Clamp(value, 3, 64);
+                var snapshot = CreateMaskStateSnapshot();
+                if (SetField(ref _polygonSides, safeValue))
+                {
+                    RegisterUndoSnapshot(snapshot);
+                    SchedulePreviewUpdate();
+                }
+            }
+        }
+
+        public double PolygonRotation
+        {
+            get => _polygonRotation;
+            set
+            {
+                var safeValue = Math.Clamp(value, -180d, 180d);
+                var snapshot = CreateMaskStateSnapshot();
+                if (SetField(ref _polygonRotation, safeValue))
+                {
+                    RegisterUndoSnapshot(snapshot);
+                    SchedulePreviewUpdate();
+                }
+            }
+        }
 
         public string LogText
         {
@@ -244,7 +346,66 @@ namespace IcoConverter.ViewModels
             }
         }
 
+        public bool IsRealTimePreviewEnabled
+        {
+            get => _isRealTimePreviewEnabled;
+            set
+            {
+                if (SetField(ref _isRealTimePreviewEnabled, value))
+                {
+                    SaveSettings();
+                    CommandManager.InvalidateRequerySuggested();
+                    if (value)
+                    {
+                        SchedulePreviewUpdate();
+                    }
+                    else if (!_suppressPreviewToggleLog)
+                    {
+                        AddLog("已关闭实时预览，可在调整参数后手动点击 '应用蒙版'。");
+                    }
+                    _suppressPreviewToggleLog = false;
+                }
+            }
+        }
+
+        public bool IsMaskSettingsExpanded
+        {
+            get => _isMaskSettingsExpanded;
+            set
+            {
+                if (SetField(ref _isMaskSettingsExpanded, value))
+                {
+                    SaveSettings();
+                }
+            }
+        }
+
+        public bool IsIcoResolutionExpanded
+        {
+            get => _isIcoResolutionExpanded;
+            set
+            {
+                if (SetField(ref _isIcoResolutionExpanded, value))
+                {
+                    SaveSettings();
+                }
+            }
+        }
+
+        public bool IsLogExpanded
+        {
+            get => _isLogExpanded;
+            set
+            {
+                if (SetField(ref _isLogExpanded, value))
+                {
+                    SaveSettings();
+                }
+            }
+        }
+
         public ObservableCollection<IcoResolution> AvailableResolutions { get; }
+        public ObservableCollection<string> MaskHistory { get; } = new();
         public ICommand LoadImageCommand { get; }
         public ICommand ApplyCornerRadiusCommand { get; }
         public ICommand ConvertToIcoCommand { get; }
@@ -255,6 +416,15 @@ namespace IcoConverter.ViewModels
         public ICommand BatchConvertCommand { get; }
         public ICommand CancelCommand { get; }
         public ICommand ClearLogCommand { get; }
+        public ICommand UndoMaskCommand { get; }
+        public ICommand RedoMaskCommand { get; }
+        public ICommand IncreaseCornerRadiusCommand { get; }
+        public ICommand DecreaseCornerRadiusCommand { get; }
+        public ICommand IncreasePolygonRotationCommand { get; }
+        public ICommand DecreasePolygonRotationCommand { get; }
+        public ICommand ClearMaskHistoryCommand { get; }
+        public bool CanUndoMask => _undoStack.Count > 0;
+        public bool CanRedoMask => _redoStack.Count > 0;
         private bool CanApplyCornerRadius() => !IsProcessing && _originalImage != null;
 
         private bool CanLoadImage(object? parameter) => !IsProcessing;
@@ -263,6 +433,46 @@ namespace IcoConverter.ViewModels
         /// 判断是否可以导出当前预览图像。
         /// </summary>
         private bool CanExportPreviewToPng(object? parameter) => !IsProcessing && PreviewImage != null;
+
+        private void SchedulePreviewUpdate()
+        {
+            if (_originalImage == null)
+            {
+                return;
+            }
+
+            if (!IsRealTimePreviewEnabled)
+            {
+                return;
+            }
+
+            _pendingPreviewUpdate = true;
+            _previewDebounceTimer.Stop();
+            _previewDebounceTimer.Start();
+        }
+
+        private async void PreviewDebounceTimer_Tick(object? sender, EventArgs e)
+        {
+            _previewDebounceTimer.Stop();
+
+            if (!_pendingPreviewUpdate)
+            {
+                return;
+            }
+
+            if (IsProcessing)
+            {
+                _previewDebounceTimer.Start();
+                return;
+            }
+
+            _pendingPreviewUpdate = false;
+
+            if (CanApplyCornerRadius())
+            {
+                await ApplyCornerRadiusAsync();
+            }
+        }
 
 
         /// <summary>
@@ -405,7 +615,7 @@ namespace IcoConverter.ViewModels
             }
             catch (Exception ex)
             {
-                AddLog($"加载图片时出错: {ex.Message}");
+                ReportError("加载图片时出错", ex);
             }
         }
 
@@ -450,8 +660,7 @@ namespace IcoConverter.ViewModels
             }
             catch (Exception ex)
             {
-                AddLog($"PNG 导出失败: {ex.Message}");
-                CustomMessageBox.Show($"PNG 导出失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                ReportError("PNG 导出失败", ex);
             }
         }
 
@@ -462,9 +671,18 @@ namespace IcoConverter.ViewModels
             try
             {
                 IsProcessing = true;
+                var shape = SelectedMaskShape;
+                var polygonSides = PolygonSides;
+                var polygonRotation = PolygonRotation;
                 var maxRadius = Math.Max(0, Math.Min(_originalImage.PixelWidth, _originalImage.PixelHeight) / 2);
                 var radius = Math.Clamp(CornerRadius, 0, maxRadius);
-                if (radius != CornerRadius)
+
+                if (shape == MaskShape.Circle && radius == 0)
+                {
+                    radius = maxRadius;
+                }
+
+                if (shape == MaskShape.RoundedRectangle && radius != CornerRadius)
                 {
                     CornerRadius = radius;
                     AddLog($"圆角半径已调整为 {radius}px（受图片尺寸限制）。");
@@ -473,49 +691,69 @@ namespace IcoConverter.ViewModels
                 if (_lastProcessedSource == _originalImage &&
                     _lastProcessedImage != null &&
                     _lastProcessedRadius == radius &&
-                    _lastProcessedQuality == SelectedCornerQuality)
+                    _lastProcessedShape == shape &&
+                    _lastProcessedPolygonSides == polygonSides &&
+                    Math.Abs(_lastProcessedPolygonRotation - polygonRotation) < 0.0001)
                 {
                     PreviewImage = _lastProcessedImage;
-                    AddLog("圆角参数未变化，已复用缓存预览。");
+                    AddLog("蒙版参数未变化，已复用缓存预览。");
                     return;
                 }
 
-                if (radius == 0)
+                var requiresMask = shape switch
+                {
+                    MaskShape.RoundedRectangle => radius > 0,
+                    MaskShape.Circle => radius > 0,
+                    _ => true
+                };
+
+                if (!requiresMask)
                 {
                     PreviewImage = _originalImage;
-                    AddLog("圆角半径为 0，使用原图预览。");
+                    AddLog("当前蒙版配置无需裁剪，已使用原图预览。");
                     _lastProcessedSource = _originalImage;
                     _lastProcessedImage = _originalImage;
                     _lastProcessedRadius = radius;
-                    _lastProcessedQuality = SelectedCornerQuality;
+                    _lastProcessedShape = shape;
+                    _lastProcessedPolygonSides = polygonSides;
+                    _lastProcessedPolygonRotation = polygonRotation;
                     return;
                 }
 
-                AddLog($"应用圆角半径: {radius}px, 质量: {SelectedCornerQuality}");
+                AddLog($"应用蒙版: {shape}，半径 {radius}px");
+
+                var stopwatch = Stopwatch.StartNew();
 
                 // 在后台线程执行耗时图像处理，避免阻塞 UI
                 BitmapSource imageToProcess = _originalImage;
-                if (imageToProcess is System.Windows.Threading.DispatcherObject dobj && dobj.CheckAccess())
+                if (imageToProcess is DispatcherObject dobj && dobj.CheckAccess())
                 {
                     if (imageToProcess.CanFreeze)
                         imageToProcess.Freeze();
                 }
 
-                var processedImage = await Task.Run(() => _imageProcessor.ApplyRoundedCorners(
+                var processedImage = await Task.Run(() => _imageProcessor.ApplyMask(
                     imageToProcess,
+                    shape,
                     radius,
-                    SelectedCornerQuality));
+                    polygonSides,
+                    polygonRotation));
+
+                stopwatch.Stop();
 
                 PreviewImage = processedImage;
                 _lastProcessedSource = _originalImage;
                 _lastProcessedImage = processedImage;
                 _lastProcessedRadius = radius;
-                _lastProcessedQuality = SelectedCornerQuality;
-                AddLog("圆角已成功应用。");
+                _lastProcessedShape = shape;
+                _lastProcessedPolygonSides = polygonSides;
+                _lastProcessedPolygonRotation = polygonRotation;
+                AddLog($"蒙版应用完成，耗时 {stopwatch.ElapsedMilliseconds}ms，输出 {processedImage.PixelWidth}x{processedImage.PixelHeight}");
+                AddHistoryEntry($"预览完成 - {DescribeMaskState(CreateMaskStateSnapshot())}");
             }
             catch (Exception ex)
             {
-                AddLog($"应用圆角时出错: {ex.Message}");
+                AddLog($"应用蒙版时出错: {ex.Message}");
             }
             finally
             {
@@ -535,17 +773,12 @@ namespace IcoConverter.ViewModels
                 IsProcessing = true;
                 AddLog("开始转换到ICO格式...");
 
-                var selectedResolutions = AvailableResolutions
-                    .Where(r => r.IsSelected)
-                    .Select(r => new System.Drawing.Size(r.Width, r.Height))
-                    .ToList();
-
-                if (selectedResolutions.Count == 0)
+                if (!TryBuildSelectedResolutions(out var selectedResolutions))
                 {
-                    AddLog("错误: 请至少选择一个分辨率。");
                     return;
                 }
 
+                // 让用户选择 ICO 输出路径，默认文件名为 icon.ico。
                 var dialog = new Microsoft.Win32.SaveFileDialog
                 {
                     Filter = "ICO 文件|*.ico",
@@ -585,7 +818,7 @@ namespace IcoConverter.ViewModels
                 }
                 else
                 {
-                    AddLog($"转换到ICO时出错: {ex.Message}");
+                    ReportError("转换到ICO时出错", ex);
                 }
             }
             finally
@@ -623,6 +856,7 @@ namespace IcoConverter.ViewModels
         {
             try
             {
+                // 批量模式一次性选择多张图片，再统一转换。
                 var openDialog = new Microsoft.Win32.OpenFileDialog
                 {
                     Filter = "图片文件|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.svg|所有文件|*.*",
@@ -635,14 +869,8 @@ namespace IcoConverter.ViewModels
                     return;
                 }
 
-                var selectedResolutions = AvailableResolutions
-                    .Where(r => r.IsSelected)
-                    .Select(r => new System.Drawing.Size(r.Width, r.Height))
-                    .ToList();
-
-                if (selectedResolutions.Count == 0)
+                if (!TryBuildSelectedResolutions(out var selectedResolutions))
                 {
-                    AddLog("错误: 请至少选择一个分辨率。");
                     return;
                 }
 
@@ -664,7 +892,9 @@ namespace IcoConverter.ViewModels
                     folderDialog.SelectedPath,
                     selectedResolutions,
                     CornerRadius,
-                    SelectedCornerQuality,
+                    SelectedMaskShape,
+                    PolygonSides,
+                    PolygonRotation,
                     TargetDpi,
                     SvgRenderMaxSize,
                     _cts.Token,
@@ -678,7 +908,7 @@ namespace IcoConverter.ViewModels
             }
             catch (Exception ex)
             {
-                AddLog($"批量转换出错: {ex.Message}");
+                ReportError("批量转换出错", ex);
             }
             finally
             {
@@ -691,8 +921,30 @@ namespace IcoConverter.ViewModels
             }
         }
 
+        /// <summary>
+        /// 汇总当前勾选的 ICO 分辨率，若未选择则提示用户。
+        /// </summary>
+        private bool TryBuildSelectedResolutions(out List<System.Drawing.Size> selectedResolutions)
+        {
+            selectedResolutions = AvailableResolutions
+                .Where(r => r.IsSelected)
+                .Select(r => new System.Drawing.Size(r.Width, r.Height))
+                .Distinct()
+                .OrderBy(size => size.Width)
+                .ToList();
+
+            if (selectedResolutions.Count > 0)
+            {
+                return true;
+            }
+
+            ReportWarning("请至少选择一个分辨率。");
+            return false;
+        }
+
         public void ProcessImageFile(string filePath)
         {
+            // 标记是否已经启动异步蒙版应用，用于 finally 中正确恢复 IsProcessing。
             bool startedApply = false;
             try
             {
@@ -717,9 +969,7 @@ namespace IcoConverter.ViewModels
                 if (!_imageLoadService.IsSupportedImageFile(filePath))
                 {
                     var extension = System.IO.Path.GetExtension(filePath).ToLower();
-                    AddLog($"错误: 不支持的文件格式 '{extension}'。");
-                    CustomMessageBox.Show($"不支持的文件格式 '{extension}'。请选择图片文件。",
-                        "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    ReportWarning($"不支持的文件格式 '{extension}'。请选择图片文件。");
                     return;
                 }
 
@@ -728,22 +978,45 @@ namespace IcoConverter.ViewModels
                 var normalizedBitmap = loadResult.Image;
 
                 AddLog($"图片 DPI: {loadResult.OriginalDpiX:0.##} x {loadResult.OriginalDpiY:0.##}");
+                AddLog($"加载 DPI: {normalizedBitmap.DpiX:0.##} x {normalizedBitmap.DpiY:0.##}");
 
                 _originalImage = normalizedBitmap;
                 PreviewImage = normalizedBitmap;
                 ImagePath = filePath;
+                UpdateCornerRadiusMaximum(normalizedBitmap);
+                UpdateHighResolutionOptions(normalizedBitmap);
 
 
                 _lastProcessedSource = null;
                 _lastProcessedImage = null;
                 _lastProcessedRadius = -1;
+                _lastProcessedShape = MaskShape.RoundedRectangle;
+                _lastProcessedPolygonSides = -1;
+                _lastProcessedPolygonRotation = double.NaN;
+                _pendingPreviewUpdate = false;
+                _previewDebounceTimer.Stop();
+                ResetHistory();
 
                 CommandManager.InvalidateRequerySuggested();
 
                 AddLog($"图片已加载: {normalizedBitmap.PixelWidth}x{normalizedBitmap.PixelHeight}");
 
-                // 自动应用默认圆角
-                if (CornerRadius > 0)
+                var largestDimension = Math.Max(normalizedBitmap.PixelWidth, normalizedBitmap.PixelHeight);
+                if (largestDimension >= AutoPreviewDisableThreshold && IsRealTimePreviewEnabled)
+                {
+                    _suppressPreviewToggleLog = true;
+                    IsRealTimePreviewEnabled = false;
+                    AddLog($"图片较大（最长边 {largestDimension}px），已自动关闭实时预览。");
+                }
+
+                bool shouldAutoApply = SelectedMaskShape switch
+                {
+                    MaskShape.RoundedRectangle => CornerRadius > 0,
+                    MaskShape.Circle => true,
+                    _ => true
+                };
+
+                if (shouldAutoApply)
                 {
                     startedApply = true;
                     _ = ApplyCornerRadiusAsync();
@@ -755,9 +1028,7 @@ namespace IcoConverter.ViewModels
             }
             catch (Exception ex)
             {
-                AddLog($"处理图片时出错: {ex.Message}");
-                CustomMessageBox.Show($"无法加载图片: {ex.Message}",
-                    "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                ReportError("处理图片时出错", ex);
             }
             finally
             {
@@ -773,12 +1044,26 @@ namespace IcoConverter.ViewModels
             _settings = _settingsService.Load();
             _isDarkTheme = _settings.IsDarkTheme;
             _targetDpi = Math.Max(1, _settings.TargetDpi);
+            _isRealTimePreviewEnabled = _settings.IsRealTimePreviewEnabled;
+            _isMaskSettingsExpanded = _settings.IsMaskSettingsExpanded;
+            _isIcoResolutionExpanded = _settings.IsIcoResolutionExpanded;
+            _isLogExpanded = _settings.IsLogExpanded;
+            _cornerRadius = Math.Max(0, _settings.LastCornerRadius);
+            _polygonSides = Math.Clamp(_settings.LastPolygonSides, 3, 64);
+            _polygonRotation = Math.Clamp(_settings.LastPolygonRotation, -180d, 180d);
         }
 
         private void SaveSettings()
         {
             _settings.IsDarkTheme = _isDarkTheme;
             _settings.TargetDpi = _targetDpi;
+            _settings.IsRealTimePreviewEnabled = _isRealTimePreviewEnabled;
+            _settings.IsMaskSettingsExpanded = _isMaskSettingsExpanded;
+            _settings.IsIcoResolutionExpanded = _isIcoResolutionExpanded;
+            _settings.IsLogExpanded = _isLogExpanded;
+            _settings.LastCornerRadius = _cornerRadius;
+            _settings.LastPolygonSides = _polygonSides;
+            _settings.LastPolygonRotation = _polygonRotation;
             _settingsService.Save(_settings);
         }
 
@@ -819,9 +1104,7 @@ namespace IcoConverter.ViewModels
             }
             else
             {
-                AddLog("错误: 拖放的文件不是支持的文件格式。");
-                CustomMessageBox.Show("拖放的文件不是支持的文件格式。",
-                    "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                ReportWarning("拖放的文件不是支持的文件格式。");
             }
         }
 
@@ -860,8 +1143,7 @@ namespace IcoConverter.ViewModels
             }
             catch (Exception ex)
             {
-                AddLog($"打开图标提取器时出错: {ex.Message}");
-                CustomMessageBox.Show($"无法打开图标提取器: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                ReportError("无法打开图标提取器", ex);
             }
         }
 
@@ -880,10 +1162,208 @@ namespace IcoConverter.ViewModels
             }, System.Windows.Threading.DispatcherPriority.Background);
         }
 
+        private void AdjustCornerRadius(int delta)
+        {
+            var next = CornerRadius + delta;
+            CornerRadius = Math.Clamp(next, 0, CornerRadiusMaximum);
+        }
+
+        private void AdjustPolygonRotation(double delta)
+        {
+            var next = PolygonRotation + delta;
+            PolygonRotation = Math.Clamp(next, -180d, 180d);
+        }
+
+        private void UpdateHighResolutionOptions(BitmapSource? source)
+        {
+            var minSide = source == null ? 0 : Math.Min(source.PixelWidth, source.PixelHeight);
+
+            foreach (var size in OptionalPngResolutions)
+            {
+                var shouldShow = minSide >= size.Width;
+                var existing = AvailableResolutions.FirstOrDefault(r => r.Width == size.Width && r.Height == size.Height);
+
+                if (shouldShow && existing == null)
+                {
+                    var insertIndex = GetResolutionInsertIndex(size.Width, size.Height);
+                    AvailableResolutions.Insert(insertIndex, new IcoResolution(size.Width, size.Height, true));
+                }
+                else if (!shouldShow && existing != null)
+                {
+                    AvailableResolutions.Remove(existing);
+                }
+            }
+        }
+
+        private int GetResolutionInsertIndex(int width, int height)
+        {
+            for (int i = 0; i < AvailableResolutions.Count; i++)
+            {
+                var current = AvailableResolutions[i];
+                if (current.Width > width)
+                {
+                    return i;
+                }
+
+                if (current.Width == width && current.Height >= height)
+                {
+                    return i;
+                }
+            }
+
+            return AvailableResolutions.Count;
+        }
+
+        private void UpdateCornerRadiusMaximum(BitmapSource? source)
+        {
+            var previousMax = CornerRadiusMaximum;
+
+            if (source == null)
+            {
+                CornerRadiusMaximum = Math.Max(MinimumCornerRadiusMaximum, DefaultCornerRadiusMaximum);
+            }
+            else
+            {
+                var shortestSide = Math.Min(source.PixelWidth, source.PixelHeight);
+                var half = Math.Max(0d, shortestSide / 2d);
+                var dynamicMax = (int)Math.Round(half, MidpointRounding.AwayFromZero);
+                CornerRadiusMaximum = Math.Max(MinimumCornerRadiusMaximum, dynamicMax);
+            }
+
+            if (CornerRadius > CornerRadiusMaximum)
+            {
+                _suspendUndoCapture = true;
+                CornerRadius = CornerRadiusMaximum;
+                _suspendUndoCapture = false;
+            }
+
+            if (CornerRadiusMaximum != previousMax)
+            {
+                var recommended = Math.Min(CornerRadiusMaximum, RecommendedCornerRadiusHint);
+                AddLog($"圆角上限已自动调整为 {CornerRadiusMaximum}px，推荐值不超过 {recommended}px 以兼顾边角细节。");
+            }
+        }
+
+        private MaskStateSnapshot CreateMaskStateSnapshot() => new(CornerRadius, SelectedMaskShape, PolygonSides, Math.Round(PolygonRotation, 3));
+
+        private void RegisterUndoSnapshot(MaskStateSnapshot snapshot)
+        {
+            if (_suspendUndoCapture || _isRestoringState)
+            {
+                return;
+            }
+
+            if (_undoStack.TryPeek(out var top) && top.Equals(snapshot))
+            {
+                return;
+            }
+
+            _undoStack.Push(snapshot);
+            _redoStack.Clear();
+            CommandManager.InvalidateRequerySuggested();
+        }
+
+        private void RestoreMaskState(MaskStateSnapshot snapshot, string logPrefix)
+        {
+            _suspendUndoCapture = true;
+            _isRestoringState = true;
+            try
+            {
+                CornerRadius = snapshot.CornerRadius;
+                SelectedMaskShape = snapshot.Shape;
+                PolygonSides = snapshot.PolygonSides;
+                PolygonRotation = snapshot.PolygonRotation;
+            }
+            finally
+            {
+                _isRestoringState = false;
+                _suspendUndoCapture = false;
+            }
+
+            AddLog($"{logPrefix}: {DescribeMaskState(snapshot)}");
+            AddHistoryEntry($"{logPrefix} - {DescribeMaskState(snapshot)}");
+            SchedulePreviewUpdate();
+            CommandManager.InvalidateRequerySuggested();
+        }
+
+        private void UndoMaskChanges()
+        {
+            if (_undoStack.Count == 0)
+            {
+                return;
+            }
+
+            var current = CreateMaskStateSnapshot();
+            var snapshot = _undoStack.Pop();
+            _redoStack.Push(current);
+            RestoreMaskState(snapshot, "已撤销到");
+        }
+
+        private void RedoMaskChanges()
+        {
+            if (_redoStack.Count == 0)
+            {
+                return;
+            }
+
+            var current = CreateMaskStateSnapshot();
+            var snapshot = _redoStack.Pop();
+            _undoStack.Push(current);
+            RestoreMaskState(snapshot, "已重做到");
+        }
+
+        private string DescribeMaskState(MaskStateSnapshot snapshot)
+            => $"{snapshot.Shape} · R={snapshot.CornerRadius}px · 边={snapshot.PolygonSides} · 旋转={snapshot.PolygonRotation:0.#}°";
+
+        private void AddHistoryEntry(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            MaskHistory.Insert(0, message);
+            const int historyLimit = 20;
+            while (MaskHistory.Count > historyLimit)
+            {
+                MaskHistory.RemoveAt(MaskHistory.Count - 1);
+            }
+            CommandManager.InvalidateRequerySuggested();
+        }
+
+        private void ResetHistory()
+        {
+            MaskHistory.Clear();
+            _undoStack.Clear();
+            _redoStack.Clear();
+            CommandManager.InvalidateRequerySuggested();
+        }
+
         private void AddLog(string message)
         {
             _logService.Add(message);
         }
+
+        private void ReportError(string message, Exception? exception = null)
+        {
+            var finalMessage = exception == null ? message : $"{message} ({exception.Message})";
+            AddLog($"错误: {finalMessage}");
+            CustomMessageBox.Show(finalMessage, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
+        private void ReportWarning(string message)
+        {
+            AddLog($"警告: {message}");
+            CustomMessageBox.Show(message, "警告", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        private void ReportInfo(string message)
+        {
+            AddLog(message);
+            CustomMessageBox.Show(message, "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private readonly record struct MaskStateSnapshot(int CornerRadius, MaskShape Shape, int PolygonSides, double PolygonRotation);
 
         /// <summary>
         /// 接收日志服务的更新并刷新 UI。
@@ -917,12 +1397,5 @@ namespace IcoConverter.ViewModels
                 StatusMessage = $"就绪 - 当前图片: {System.IO.Path.GetFileName(ImagePath)}";
             }
         }
-    }
-
-    public enum CornerQuality
-    {
-        Low,
-        Medium,
-        High
     }
 }
