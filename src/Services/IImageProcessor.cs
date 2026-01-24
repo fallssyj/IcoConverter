@@ -9,8 +9,14 @@ namespace IcoConverter.Services
     public interface IImageProcessor
     {
         /// <summary>
-        /// 对给定的 <see cref="BitmapSource"/> 按指定蒙版形状进行裁剪。
+        /// 对给定的 <see cref="BitmapSource"/> 按指定蒙版形状进行裁剪，并根据图像变换参数缩放/平移源图像。
         /// </summary>
-        BitmapSource ApplyMask(BitmapSource source, MaskShape shape, int cornerRadius, int polygonSides, double polygonRotationDegrees);
+        BitmapSource ApplyMask(
+            BitmapSource source,
+            MaskShape shape,
+            int cornerRadius,
+            int polygonSides,
+            double polygonRotationDegrees,
+            ImageTransformOptions transformOptions);
     }
 }
