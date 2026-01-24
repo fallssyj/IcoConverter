@@ -1,5 +1,5 @@
 using System.Windows.Media.Imaging;
-using IcoConverter.ViewModels;
+using IcoConverter.Models;
 
 namespace IcoConverter.Services
 {
@@ -9,8 +9,8 @@ namespace IcoConverter.Services
     public interface IImageProcessor
     {
         /// <summary>
-        /// 对给定的 <see cref="BitmapSource"/> 应用圆角处理。
+        /// 对给定的 <see cref="BitmapSource"/> 按指定蒙版形状进行裁剪。
         /// </summary>
-        BitmapSource ApplyRoundedCorners(BitmapSource source, int cornerRadius, CornerQuality quality);
+        BitmapSource ApplyMask(BitmapSource source, MaskShape shape, int cornerRadius, int polygonSides, double polygonRotationDegrees);
     }
 }
