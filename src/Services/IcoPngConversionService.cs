@@ -1,4 +1,6 @@
 using IcoConverter.Models;
+using System;
+using System.Buffers.Binary;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -27,7 +29,7 @@ namespace IcoConverter.Services
 
             var entries = ReadEntries(icoPath);
             return entries
-                .Select(entry => new IcoResolution(entry.Width, entry.Height, true))
+                .Select(entry => new IcoResolution(entry.DisplayWidth, entry.DisplayHeight, true))
                 .GroupBy(r => (r.Width, r.Height))
                 .Select(g => g.First())
                 .OrderBy(r => r.Width)
@@ -84,7 +86,7 @@ namespace IcoConverter.Services
                 var entryMap = new Dictionary<(int Width, int Height), IcoEntry>();
                 foreach (var entry in entries)
                 {
-                    entryMap.TryAdd((entry.Width, entry.Height), entry);
+                    entryMap.TryAdd((entry.DisplayWidth, entry.DisplayHeight), entry);
                 }
 
                 var missing = selectedList
@@ -160,6 +162,7 @@ namespace IcoConverter.Services
                     imageOffset));
             }
 
+            PopulatePngEntryDimensions(reader.BaseStream, entries);
             return entries;
         }
 
@@ -177,6 +180,38 @@ namespace IcoConverter.Services
             return reader.ReadBytes((int)entry.BytesInRes);
         }
 
+        private static void PopulatePngEntryDimensions(Stream stream, List<IcoEntry> entries)
+        {
+            var originalPosition = stream.Position;
+            Span<byte> header = stackalloc byte[24];
+
+            foreach (var entry in entries)
+            {
+                if (entry.BytesInRes < header.Length)
+                {
+                    continue;
+                }
+
+                stream.Seek(entry.ImageOffset, SeekOrigin.Begin);
+                var read = stream.Read(header);
+                if (read < header.Length)
+                {
+                    continue;
+                }
+
+                if (!IsPngPayload(header))
+                {
+                    continue;
+                }
+
+                entry.IsPng = true;
+                entry.TrueWidth = BinaryPrimitives.ReadInt32BigEndian(header.Slice(16, 4));
+                entry.TrueHeight = BinaryPrimitives.ReadInt32BigEndian(header.Slice(20, 4));
+            }
+
+            stream.Seek(originalPosition, SeekOrigin.Begin);
+        }
+
         /// <summary>
         /// 使用单独的目录项构造临时 ICO 并输出 Bitmap。
         /// </summary>
@@ -185,6 +220,15 @@ namespace IcoConverter.Services
             if (imageData.Length == 0)
             {
                 throw new InvalidOperationException("ICO 图像数据为空。");
+            }
+
+            // PNG 编码的目录项直接解码即可，无需重新拼装 ICO 头。
+            if (entry.IsPng || IsPngPayload(imageData.AsSpan()))
+            {
+                // Bitmap(Stream) 会持有底层流，需额外克隆一份脱离原始缓冲区。
+                using var pngStream = new MemoryStream(imageData, writable: false);
+                using var pngBitmap = new Bitmap(pngStream);
+                return new Bitmap(pngBitmap);
             }
 
             // 某些 PNG 目录项的位平面与位深为 0，需提供安全的回退值。
@@ -213,9 +257,43 @@ namespace IcoConverter.Services
             return icon.ToBitmap();
         }
 
+        private static bool IsPngPayload(ReadOnlySpan<byte> data)
+        {
+            if (data.Length < 8)
+            {
+                return false;
+            }
+
+            Span<byte> signature = stackalloc byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+            return data.Slice(0, 8).SequenceEqual(signature);
+        }
+
         /// <summary>
-        /// ICO 目录项数据结构。
+        /// ICO 目录项数据结构，包含原始字段与 PNG 拓展信息。
         /// </summary>
-        private sealed record IcoEntry(int Width, int Height, ushort Planes, ushort BitCount, uint BytesInRes, uint ImageOffset);
+        private sealed class IcoEntry
+        {
+            public IcoEntry(int width, int height, ushort planes, ushort bitCount, uint bytesInRes, uint imageOffset)
+            {
+                Width = width;
+                Height = height;
+                Planes = planes;
+                BitCount = bitCount;
+                BytesInRes = bytesInRes;
+                ImageOffset = imageOffset;
+            }
+
+            public int Width { get; }
+            public int Height { get; }
+            public ushort Planes { get; }
+            public ushort BitCount { get; }
+            public uint BytesInRes { get; }
+            public uint ImageOffset { get; }
+            public bool IsPng { get; set; }
+            public int? TrueWidth { get; set; }
+            public int? TrueHeight { get; set; }
+            public int DisplayWidth => TrueWidth ?? Width;
+            public int DisplayHeight => TrueHeight ?? Height;
+        }
     }
 }
