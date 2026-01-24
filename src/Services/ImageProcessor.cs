@@ -15,13 +15,21 @@ namespace IcoConverter.Services
         /// 返回的图像与原图保持相同的尺寸与 DPI，使用 SkiaSharp 进行像素级裁剪并冻结结果，
         /// 以确保可安全在多个线程间使用。
         /// </summary>
-        public BitmapSource ApplyMask(BitmapSource source, MaskShape shape, int cornerRadius, int polygonSides, double polygonRotationDegrees)
+        public BitmapSource ApplyMask(
+            BitmapSource source,
+            MaskShape shape,
+            int cornerRadius,
+            int polygonSides,
+            double polygonRotationDegrees,
+            ImageTransformOptions transformOptions)
         {
             var normalizedSource = EnsurePbgra32(source);
             var width = normalizedSource.PixelWidth;
             var height = normalizedSource.PixelHeight;
             using var maskPath = CreateMaskPath(shape, width, height, cornerRadius, polygonSides, polygonRotationDegrees);
-            if (maskPath == null)
+            var hasMask = maskPath != null;
+            var requiresProcessing = hasMask || !transformOptions.IsIdentity;
+            if (!requiresProcessing)
             {
                 return source;
             }
@@ -44,8 +52,25 @@ namespace IcoConverter.Services
                 var canvas = surface.Canvas;
                 canvas.Clear(SKColors.Transparent);
 
-                canvas.ClipPath(maskPath, SKClipOperation.Intersect, antialias: true);
+                if (hasMask && maskPath != null)
+                {
+                    canvas.ClipPath(maskPath, SKClipOperation.Intersect, antialias: true);
+                }
+
+                var applyTransform = !transformOptions.IsIdentity;
+                if (applyTransform)
+                {
+                    canvas.Save();
+                    ApplyTransform(canvas, width, height, transformOptions);
+                }
+
                 canvas.DrawBitmap(tempBitmap, 0, 0);
+
+                if (applyTransform)
+                {
+                    canvas.Restore();
+                }
+
                 canvas.Flush();
 
                 using var rounded = surface.Snapshot();
@@ -112,18 +137,30 @@ namespace IcoConverter.Services
 
                 case MaskShape.Polygon:
                     var sides = Math.Max(3, polygonSides);
-                    return CreatePolygonPath(width, height, sides, polygonRotationDegrees);
+                    var maxRadius = Math.Min(width, height) / 2f;
+                    var polygonRadius = cornerRadius <= 0
+                        ? maxRadius
+                        : Math.Min(cornerRadius, maxRadius);
+                    if (polygonRadius <= 0)
+                    {
+                        return null;
+                    }
+                    return CreatePolygonPath(width, height, sides, polygonRotationDegrees, polygonRadius);
 
                 default:
                     return null;
             }
         }
 
-        private static SKPath? CreatePolygonPath(int width, int height, int sides, double rotationDegrees)
+        private static SKPath? CreatePolygonPath(int width, int height, int sides, double rotationDegrees, float radius)
         {
+            if (radius <= 0)
+            {
+                return null;
+            }
+
             var path = new SKPath { FillType = SKPathFillType.Winding };
             var center = new SKPoint(width / 2f, height / 2f);
-            var radius = Math.Min(width, height) / 2f;
             var angleStep = (float)(2 * Math.PI / sides);
             var startAngle = -Math.PI / 2f + rotationDegrees * Math.PI / 180.0;
 
@@ -144,6 +181,23 @@ namespace IcoConverter.Services
 
             path.Close();
             return path;
+        }
+
+        private static void ApplyTransform(SKCanvas canvas, int width, int height, ImageTransformOptions transformOptions)
+        {
+            var scale = (float)Math.Max(0.01, transformOptions.Scale);
+            var offsetX = (float)transformOptions.OffsetX;
+            var offsetY = (float)transformOptions.OffsetY;
+
+            if (Math.Abs(scale - 1f) > 0.0001f)
+            {
+                canvas.Scale(scale, scale, width / 2f, height / 2f);
+            }
+
+            if (Math.Abs(offsetX) > 0.01f || Math.Abs(offsetY) > 0.01f)
+            {
+                canvas.Translate(offsetX, offsetY);
+            }
         }
 
         private static BitmapSource EnsurePbgra32(BitmapSource source)
