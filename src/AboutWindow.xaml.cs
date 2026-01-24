@@ -38,7 +38,6 @@ public partial class AboutWindow
         "MiSans",
         "HandyControl",
         "Microsoft.Extensions.DependencyInjection",
-        "System.Drawing.Common",
         "SkiaSharp",
         "Svg.Skia"
     ];
