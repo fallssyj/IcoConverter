@@ -8,5 +8,19 @@ namespace IcoConverter.Services
         public bool IsDarkTheme { get; set; }
 
         public double TargetDpi { get; set; } = 96d;
+
+        public bool IsRealTimePreviewEnabled { get; set; } = true;
+
+        public bool IsMaskSettingsExpanded { get; set; } = true;
+
+        public bool IsIcoResolutionExpanded { get; set; } = true;
+
+        public bool IsLogExpanded { get; set; }
+
+        public double LastPolygonRotation { get; set; }
+
+        public int LastPolygonSides { get; set; } = 6;
+
+        public int LastCornerRadius { get; set; } = 20;
     }
 }
