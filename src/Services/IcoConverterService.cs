@@ -1,11 +1,14 @@
 using IcoConverter.Models;
 using Microsoft.Win32.SafeHandles;
 using System.ComponentModel;
+using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using DrawingPixelFormat = System.Drawing.Imaging.PixelFormat;
 
 namespace IcoConverter.Services
 {
@@ -253,12 +256,14 @@ namespace IcoConverter.Services
         {
             ArgumentNullException.ThrowIfNull(source);
             var originalBitmap = BitmapSourceToBitmap(source);
+            var squareBitmap = originalBitmap.Width == originalBitmap.Height
+                ? originalBitmap
+                : FitBitmapToSquare(originalBitmap);
 
             try
             {
-                // 为每个分辨率生成 DIB 数据（一次编码，避免重复编码开销），并记录尺寸
-                var sizes = new List<System.Drawing.Size>();
-                var bitmapDatas = new List<byte[]>();
+                // 为每个分辨率生成对应的图像数据（DIB 或 PNG），并记录尺寸和编码方式。
+                var imagePayloads = new List<IconImagePayload>();
 
                 foreach (var resolution in resolutions.OrderBy(r => r.Width))
                 {
@@ -266,15 +271,16 @@ namespace IcoConverter.Services
                     System.Drawing.Bitmap resized = null;
                     try
                     {
-                        resized = ResizeBitmap(originalBitmap, resolution.Width, resolution.Height);
-                        var data = GetBitmapDibData(resized!);
+                        // 每个尺寸都从原图重新缩放，保证锐度，并立刻编码，减少中间格式转换。
+                        resized = ResizeBitmap(squareBitmap, resolution.Width, resolution.Height);
+                        var encodeAsPng = ShouldEncodeAsPng(resolution.Width, resolution.Height);
+                        var data = encodeAsPng ? EncodeBitmapAsPng(resized!) : GetBitmapDibData(resized!);
                         if (data == null || data.Length == 0)
                         {
                             throw new InvalidOperationException($"调整到 {resolution.Width}x{resolution.Height} 时编码失败: DIB 数据为空");
                         }
 
-                        sizes.Add(new System.Drawing.Size(resized!.Width, resized!.Height));
-                        bitmapDatas.Add(data);
+                        imagePayloads.Add(new IconImagePayload(resized!.Width, resized!.Height, data, encodeAsPng));
                     }
                     catch (Exception ex)
                     {
@@ -288,22 +294,24 @@ namespace IcoConverter.Services
                 }
 
                 using var ms = new MemoryStream();
-                WriteIcoHeader(ms, bitmapDatas.Count);
+                WriteIcoHeader(ms, imagePayloads.Count);
 
-                int currentOffset = 6 + (bitmapDatas.Count * 16);
+                int currentOffset = 6 + (imagePayloads.Count * 16);
 
-                // 写入目录条目（使用已编码的数据长度）
-                for (int i = 0; i < bitmapDatas.Count; i++)
+                // 写入目录条目（使用已编码的数据长度）。ICO 目录只记录尺寸/偏移，因此我们依赖前面得到的 bytes 数组。
+                for (int i = 0; i < imagePayloads.Count; i++)
                 {
-                    var entry = CreateDirectoryEntry(sizes[i].Width, sizes[i].Height, bitmapDatas[i].Length, currentOffset);
+                    var payload = imagePayloads[i];
+                    var entry = CreateDirectoryEntry(payload.Width, payload.Height, payload.Data.Length, currentOffset, payload.IsPng);
                     ms.Write(entry, 0, entry.Length);
-                    currentOffset += bitmapDatas[i].Length;
+                    currentOffset += payload.Data.Length;
                 }
 
-                // 写入位图（DIB）数据
-                for (int i = 0; i < bitmapDatas.Count; i++)
+                // 按顺序写入所有位图/PNG 数据，最终即可由 Icon 类直接读取。
+                for (int i = 0; i < imagePayloads.Count; i++)
                 {
-                    ms.Write(bitmapDatas[i], 0, bitmapDatas[i].Length);
+                    var payload = imagePayloads[i];
+                    ms.Write(payload.Data, 0, payload.Data.Length);
                 }
 
                 // 返回图标对象（从内存复制字节以避免对原流的依赖）
@@ -312,7 +320,11 @@ namespace IcoConverter.Services
             }
             finally
             {
-                originalBitmap?.Dispose();
+                squareBitmap?.Dispose();
+                if (!ReferenceEquals(squareBitmap, originalBitmap))
+                {
+                    originalBitmap?.Dispose();
+                }
             }
         }
 #pragma warning restore CS8600
@@ -331,7 +343,7 @@ namespace IcoConverter.Services
         /// <summary>
         /// 创建 ICO 目录项的 16 字节条目。
         /// </summary>
-        private static byte[] CreateDirectoryEntry(int widthPx, int heightPx, int dataSize, int offset)
+        private static byte[] CreateDirectoryEntry(int widthPx, int heightPx, int dataSize, int offset, bool isPng)
         {
             using var ms = new MemoryStream();
             byte width = (byte)(widthPx >= 256 ? 0 : widthPx);
@@ -343,8 +355,13 @@ namespace IcoConverter.Services
             ms.WriteByte(0);
             ms.WriteByte(0);
 
-            ms.Write([1, 0], 0, 2);
-            ms.Write([32, 0], 0, 2);
+            ushort planes = isPng ? (ushort)0 : (ushort)1;
+            ms.WriteByte((byte)(planes & 0xFF));
+            ms.WriteByte((byte)((planes >> 8) & 0xFF));
+
+            ushort bitCount = isPng ? (ushort)0 : (ushort)32;
+            ms.WriteByte((byte)(bitCount & 0xFF));
+            ms.WriteByte((byte)((bitCount >> 8) & 0xFF));
 
             ms.WriteByte((byte)(dataSize & 0xFF));
             ms.WriteByte((byte)((dataSize >> 8) & 0xFF));
@@ -373,11 +390,12 @@ namespace IcoConverter.Services
             int stride = width * 4;
             int maskStride = ((width + 31) / 32) * 4;
 
+            // 直接读取 BGRA 像素到托管数组，便于后续按 ICO 规则倒序写出。
             var pixels = new byte[stride * height];
             var data = converted.LockBits(
                 new System.Drawing.Rectangle(0, 0, width, height),
                 ImageLockMode.ReadOnly,
-                PixelFormat.Format32bppArgb);
+                DrawingPixelFormat.Format32bppArgb);
 
             try
             {
@@ -405,13 +423,13 @@ namespace IcoConverter.Services
             bw.Write(0);                 // biClrUsed
             bw.Write(0);                 // biClrImportant
 
-            // XOR 位图数据（按自底向上顺序写入）
+            // XOR 位图数据（按自底向上顺序写入，遵循 DIB 布局）。
             for (int y = height - 1; y >= 0; y--)
             {
                 bw.Write(pixels, y * stride, stride);
             }
 
-            // AND mask（32bpp 带 alpha 时可全 0）
+            // AND mask（32bpp 带 alpha 时可全 0，用于兼容旧版渲染管线）。
             var mask = new byte[maskStride * height];
             bw.Write(mask);
 
@@ -423,13 +441,14 @@ namespace IcoConverter.Services
         /// </summary>
         private static System.Drawing.Bitmap Ensure32bppArgb(System.Drawing.Bitmap source)
         {
-            if (source.PixelFormat == PixelFormat.Format32bppArgb)
+            if (source.PixelFormat == DrawingPixelFormat.Format32bppArgb)
             {
                 return (System.Drawing.Bitmap)source.Clone();
             }
 
-            var converted = new System.Drawing.Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
+            var converted = new System.Drawing.Bitmap(source.Width, source.Height, DrawingPixelFormat.Format32bppArgb);
             using var g = System.Drawing.Graphics.FromImage(converted);
+            // SourceCopy 可避免 alpha 被再次混合，确保透明度信息完整。
             g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
             g.DrawImage(source, 0, 0, source.Width, source.Height);
             return converted;
@@ -440,6 +459,21 @@ namespace IcoConverter.Services
         /// </summary>
         private static System.Drawing.Bitmap BitmapSourceToBitmap(BitmapSource source)
         {
+            if (source.Format != PixelFormats.Pbgra32)
+            {
+                var converted = new FormatConvertedBitmap();
+                converted.BeginInit();
+                converted.Source = source;
+                converted.DestinationFormat = PixelFormats.Pbgra32;
+                converted.EndInit();
+                if (converted.CanFreeze)
+                {
+                    converted.Freeze();
+                }
+                source = converted;
+            }
+
+            // WPF 的 BitmapSource 与 GDI+ 位图内存布局不同，需要手动 CopyPixels。
             var bitmap = new System.Drawing.Bitmap(
                 source.PixelWidth,
                 source.PixelHeight,
@@ -471,10 +505,11 @@ namespace IcoConverter.Services
         /// </summary>
         private static System.Drawing.Bitmap ResizeBitmap(System.Drawing.Bitmap original, int width, int height)
         {
-            var resized = new System.Drawing.Bitmap(width, height, PixelFormat.Format32bppArgb);
+            var resized = new System.Drawing.Bitmap(width, height, DrawingPixelFormat.Format32bppArgb);
 
             using (var graphics = System.Drawing.Graphics.FromImage(resized))
             {
+                // 使用高质量插值/抗锯齿，保证图标在小尺寸下仍保持清晰。
                 graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
                 graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
                 graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
@@ -486,6 +521,42 @@ namespace IcoConverter.Services
 
             return resized;
         }
+
+        private static byte[] EncodeBitmapAsPng(System.Drawing.Bitmap bitmap)
+        {
+            using var ms = new MemoryStream();
+            bitmap.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+            return ms.ToArray();
+        }
+
+        private static bool ShouldEncodeAsPng(int width, int height)
+        {
+            return Math.Max(width, height) >= 512;
+        }
+
+        private static System.Drawing.Bitmap FitBitmapToSquare(System.Drawing.Bitmap source)
+        {
+            var size = Math.Max(source.Width, source.Height);
+            var square = new System.Drawing.Bitmap(size, size, DrawingPixelFormat.Format32bppArgb);
+
+            using var graphics = System.Drawing.Graphics.FromImage(square);
+            graphics.Clear(System.Drawing.Color.Transparent);
+            graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+            graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+            graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+
+            var scale = (float)size / Math.Min(source.Width, source.Height);
+            var scaledWidth = source.Width * scale;
+            var scaledHeight = source.Height * scale;
+            var offsetX = (size - scaledWidth) / 2f;
+            var offsetY = (size - scaledHeight) / 2f;
+            graphics.DrawImage(source, offsetX, offsetY, scaledWidth, scaledHeight);
+
+            return square;
+        }
+
+        private sealed record IconImagePayload(int Width, int Height, byte[] Data, bool IsPng);
 
         /// <summary>
         /// 负责使用 Win32 资源 API 枚举并拼装 ICON 结果的辅助类。
