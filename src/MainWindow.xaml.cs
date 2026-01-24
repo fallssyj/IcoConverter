@@ -107,4 +107,54 @@ public partial class MainWindow
             textBox.CaretIndex = textBox.Text.Length;
         }
     }
+
+    private void CornerRadiusSlider_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
+        if (e.Delta > 0)
+        {
+            if (viewModel.IncreaseCornerRadiusCommand.CanExecute(null))
+            {
+                viewModel.IncreaseCornerRadiusCommand.Execute(null);
+            }
+        }
+        else if (e.Delta < 0)
+        {
+            if (viewModel.DecreaseCornerRadiusCommand.CanExecute(null))
+            {
+                viewModel.DecreaseCornerRadiusCommand.Execute(null);
+            }
+        }
+
+        e.Handled = true;
+    }
+
+    private void PolygonRotationSlider_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
+        if (e.Delta > 0)
+        {
+            if (viewModel.IncreasePolygonRotationCommand.CanExecute(null))
+            {
+                viewModel.IncreasePolygonRotationCommand.Execute(null);
+            }
+        }
+        else if (e.Delta < 0)
+        {
+            if (viewModel.DecreasePolygonRotationCommand.CanExecute(null))
+            {
+                viewModel.DecreasePolygonRotationCommand.Execute(null);
+            }
+        }
+
+        e.Handled = true;
+    }
 }
