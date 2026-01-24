@@ -461,7 +461,7 @@
 
                             </StackPanel>
                         </Expander>
-
+                        <!--  蒙版记录  -->
                         <Expander Margin="0,0,0,10" Header="蒙版记录">
                             <StackPanel Margin="10,5,0,0">
                                 <TextBlock Opacity="0.7" Text="展示最近 20 条蒙版调整与预览记录。" />
@@ -500,7 +500,7 @@
                                     Content="清空记录" />
                             </StackPanel>
                         </Expander>
-
+                        <!--  使用提示  -->
                         <Expander
                             Margin="0,5,0,10"
                             Header="使用提示"
@@ -524,8 +524,11 @@
 
                         <Separator Margin="0,0,0,10" />
 
-                        <!--  ICO分辨率设置 - 使用Card样式  -->
-                        <Expander Header="ICO分辨率" IsExpanded="{Binding IsIcoResolutionExpanded}">
+                        <!--  ICO分辨率设置  -->
+                        <Expander
+                            Margin="0,0,0,10"
+                            Header="ICO分辨率"
+                            IsExpanded="{Binding IsIcoResolutionExpanded}">
                             <ListBox
                                 MaxHeight="200"
                                 ItemsSource="{Binding AvailableResolutions}"
