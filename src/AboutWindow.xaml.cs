@@ -36,7 +36,7 @@ public partial class AboutWindow
     public ObservableCollection<string> Libraries { get; } =
     [
         "MiSans",
-        "HandyControl",
+        "HandyControls",
         "Microsoft.Extensions.DependencyInjection",
         "SkiaSharp",
         "Svg.Skia"

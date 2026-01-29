@@ -1,12 +1,12 @@
+using HandyControl.Themes;
+using HandyControl.Tools;
 using IcoConverter.Models;
 using IcoConverter.Services;
 using IcoConverter.Utils;
 using Microsoft.Extensions.DependencyInjection;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
@@ -22,8 +22,6 @@ namespace IcoConverter.ViewModels
     {
 
 
-        private readonly Uri _lightThemeUri = new("Styles/Theme/BaseLight.xaml", UriKind.Relative);
-        private readonly Uri _darkThemeUri = new("Styles/Theme/BaseDark.xaml", UriKind.Relative);
         private bool _isDarkTheme;
 
         private readonly IImageProcessor _imageProcessor;
@@ -557,54 +555,28 @@ namespace IcoConverter.ViewModels
         /// </summary>
         private void ChangeTheme(object? arg)
         {
-            var nextTheme = !_isDarkTheme;
-            ApplyTheme(nextTheme);
+            ApplyTheme(!_isDarkTheme);
             SaveSettings();
         }
         /// <summary>
-        /// 将主题字典动态替换为浅色或深色版本。
+        /// 将主题替换为浅色或深色版本。
         /// </summary>
         private void ApplyTheme(bool useDarkTheme)
         {
-            var application = System.Windows.Application.Current;
-            if (application == null)
+            var window = System.Windows.Application.Current?.MainWindow;
+            if (window == null)
             {
-                _isDarkTheme = useDarkTheme;
                 return;
             }
-
-            var dictionaries = application.Resources.MergedDictionaries;
-            var currentDictionary = dictionaries.FirstOrDefault(IsThemeDictionary);
-            var nextUri = useDarkTheme ? _darkThemeUri : _lightThemeUri;
-            var replacement = new ResourceDictionary { Source = nextUri };
-
-            if (currentDictionary is null)
-            {
-                dictionaries.Add(replacement);
-            }
-            else
-            {
-                var index = dictionaries.IndexOf(currentDictionary);
-                dictionaries.Insert(index, replacement);
-                dictionaries.Remove(currentDictionary);
-            }
-
+            ThemeAnimationHelper.AnimateTheme(window, ThemeAnimationHelper.SlideDirection.Top, 0.3, 1, 0.5);
+            ThemeManager.Current.ApplicationTheme = useDarkTheme
+                ? ApplicationTheme.Dark
+                : ApplicationTheme.Light;
+            ThemeAnimationHelper.AnimateTheme(window, ThemeAnimationHelper.SlideDirection.Bottom, 0.3, 0.5, 1);
             _isDarkTheme = useDarkTheme;
         }
 
-        /// <summary>
-        /// 判断资源字典是否属于主题目录，用于定位当前主题。
-        /// </summary>
-        private static bool IsThemeDictionary(ResourceDictionary dictionary)
-        {
-            var original = dictionary.Source?.OriginalString;
-            if (string.IsNullOrEmpty(original))
-            {
-                return false;
-            }
 
-            return original.Contains("Styles/Theme/", StringComparison.OrdinalIgnoreCase);
-        }
         /// <summary>
         /// 获取与当前ViewModel关联的窗口
         /// </summary>
