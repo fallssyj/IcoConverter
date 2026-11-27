@@ -1,0 +1,49 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationIcon>Assets\ICO\app.ico</ApplicationIcon>
+  </PropertyGroup>
+	
+  <Import Project="$(MSBuildProjectDirectory)\version.props" Condition="Exists('$(MSBuildProjectDirectory)\version.props')" />
+	
+  <ItemGroup>
+    <None Remove="Assets\PNG\app.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\ICO\app.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.5" />
+    <PackageReference Include="SkiaSharp" Version="3.119.2" />
+    <PackageReference Include="Svg.Skia" Version="4.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="Switch.System.Windows.Appearance.DisableFluentThemeWindowBackdrop" Value="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\LICENSE\LICENSE" />
+    <Resource Include="Assets\PNG\app.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Assets\Updagee\Updagee.exe">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- 将第三方声明随应用输出，供发布包分发。 -->
+  <ItemGroup>
+    <Content Include="..\THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

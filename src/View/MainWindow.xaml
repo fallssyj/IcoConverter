@@ -1,0 +1,314 @@
+<Window
+    x:Class="IcoConverter.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:utils="clr-namespace:IcoConverter.Utils"
+    xmlns:views="clr-namespace:IcoConverter.View"
+    Title="{Binding Title}"
+    Width="1160"
+    Height="816"
+    MinWidth="1160"
+    MinHeight="696"
+    utils:DragDropCommandBehavior.DragLeaveCommand="{Binding WindowDragLeaveCommand}"
+    utils:DragDropCommandBehavior.DragOverCommand="{Binding WindowDragOverCommand}"
+    utils:DragDropCommandBehavior.DropCommand="{Binding WindowDropCommand}"
+    AllowDrop="True"
+    WindowStartupLocation="CenterScreen"
+    mc:Ignorable="d">
+    <Grid x:Name="WindowContent">
+        <Grid.RowDefinitions>
+            <RowDefinition x:Name="TitleBarRow" Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel
+            x:Name="TitleBarToolbar"
+            Grid.Row="0"
+            Margin="16,5,0,0"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Center"
+            Orientation="Horizontal"
+            WindowChrome.IsHitTestVisibleInChrome="True">
+            <Button
+                Height="36"
+                Padding="12,0"
+                Command="{Binding LoadImageCommand}"
+                Style="{StaticResource AccentButtonStyle}"
+                ToolTip="打开图片文件">
+                <StackPanel Orientation="Horizontal">
+                    <Path Data="{StaticResource IconOpen}" Style="{StaticResource FluentIcon}" />
+                    <TextBlock Margin="8,0,0,0" Text="打开" />
+                </StackPanel>
+            </Button>
+
+            <Border
+                Width="1"
+                Height="22"
+                Margin="10,0"
+                Background="{DynamicResource DividerStrokeColorDefaultBrush}" />
+
+            <Button
+                Height="36"
+                Margin="2,0,0,0"
+                Padding="12,0"
+                Click="OnToolbarMenuClick"
+                IsEnabled="{Binding CanExportIcon}"
+                ToolTip="导出（ICO / ICNS / PNG / WebP / 网站图标）">
+                <Button.ContextMenu>
+                    <ContextMenu Placement="Bottom">
+                        <MenuItem Click="OnExportIcoMenuClick" Header="导出 ICO（Windows）" />
+                        <MenuItem Click="OnExportIcnsMenuClick" Header="导出 ICNS（macOS）" />
+                        <MenuItem Click="OnExportPngMenuClick" Header="导出 PNG（预览图）" />
+                        <MenuItem Click="OnExportPngSetMenuClick" Header="导出 PNG 图标集（多尺寸）" />
+                        <MenuItem Click="OnExportWebpMenuClick" Header="导出 WebP（预览图）" />
+                        <MenuItem Click="OnExportWebsiteIconsMenuClick" Header="导出网站图标" />
+                    </ContextMenu>
+                </Button.ContextMenu>
+
+                <StackPanel Orientation="Horizontal">
+                    <Path Data="{StaticResource IconExportIco}" Style="{StaticResource FluentIcon}" />
+                    <TextBlock
+                        Margin="8,0,0,0"
+                        VerticalAlignment="Center"
+                        Text="导出" />
+                    <Path
+                        Width="6"
+                        Height="6"
+                        Margin="6,0,0,0"
+                        Data="{StaticResource IconChevronDown}"
+                        Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                        Stretch="Uniform" />
+                </StackPanel>
+            </Button>
+
+            <Border
+                Width="1"
+                Height="22"
+                Margin="10,0"
+                Background="{DynamicResource DividerStrokeColorDefaultBrush}" />
+
+            <Button
+                Margin="2,0,0,0"
+                AutomationProperties.Name="裁剪图片"
+                Command="{Binding ToggleCropModeCommand}"
+                Style="{StaticResource ToolBarButtonStyle}"
+                ToolTip="裁剪图片">
+                <Path Data="{StaticResource IconCrop}" Style="{StaticResource FluentIcon}" />
+            </Button>
+
+            <Button
+                Margin="2,0,0,0"
+                AutomationProperties.Name="恢复整图（取消裁剪）"
+                Command="{Binding ResetCropCommand}"
+                Style="{StaticResource ToolBarButtonStyle}"
+                ToolTip="恢复整图（取消裁剪）"
+                Visibility="{Binding HasCropApplied, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Path Data="{StaticResource IconResetCrop}" Style="{StaticResource FluentIcon}" />
+            </Button>
+
+            <Border
+                Width="1"
+                Height="22"
+                Margin="10,0"
+                Background="{DynamicResource DividerStrokeColorDefaultBrush}" />
+
+            <Button
+                Margin="2,0,0,0"
+                AutomationProperties.Name="批量转换"
+                Command="{Binding BatchConvertCommand}"
+                Style="{StaticResource ToolBarButtonStyle}"
+                ToolTip="批量转换">
+                <Path Data="{StaticResource IconBatch}" Style="{StaticResource FluentIcon}" />
+            </Button>
+
+            <Border
+                Width="1"
+                Height="22"
+                Margin="10,0"
+                Background="{DynamicResource DividerStrokeColorDefaultBrush}" />
+
+            <Button
+                AutomationProperties.Name="背景材质"
+                Click="OnToolbarMenuClick"
+                Style="{StaticResource ToolBarDropDownButtonStyle}"
+                ToolTip="背景材质">
+                <Button.ContextMenu>
+                    <ContextMenu Placement="Bottom">
+                        <MenuItem
+                            x:Name="MicaMaterialItem"
+                            Click="OnMaterialMicaClick"
+                            Header="云母（Mica）"
+                            IsCheckable="True" />
+                        <MenuItem
+                            x:Name="AcrylicMaterialItem"
+                            Click="OnMaterialAcrylicClick"
+                            Header="亚克力（Acrylic）"
+                            IsCheckable="True" />
+                        <MenuItem
+                            x:Name="SolidMaterialItem"
+                            Click="OnMaterialSolidClick"
+                            Header="纯色（不透明）"
+                            IsCheckable="True" />
+                    </ContextMenu>
+                </Button.ContextMenu>
+
+                <Path Data="{StaticResource IconOptions}" Style="{StaticResource FluentIcon}" />
+            </Button>
+
+            <Button
+                Margin="2,0,0,0"
+                AutomationProperties.Name="预览背景"
+                Click="OnToolbarMenuClick"
+                Style="{StaticResource ToolBarDropDownButtonStyle}"
+                ToolTip="预览背景">
+                <Button.ContextMenu>
+                    <ContextMenu Placement="Bottom">
+                        <MenuItem
+                            x:Name="NoneBackgroundItem"
+                            Click="OnPreviewBackgroundNoneClick"
+                            Header="无背景（跟随材质）"
+                            IsCheckable="True" />
+                        <MenuItem
+                            x:Name="CheckerBackgroundItem"
+                            Click="OnPreviewBackgroundCheckerClick"
+                            Header="棋盘格"
+                            IsCheckable="True" />
+                        <MenuItem
+                            x:Name="WhiteBackgroundItem"
+                            Click="OnPreviewBackgroundWhiteClick"
+                            Header="白色底板"
+                            IsCheckable="True" />
+                        <MenuItem
+                            x:Name="BlackBackgroundItem"
+                            Click="OnPreviewBackgroundBlackClick"
+                            Header="黑色底板"
+                            IsCheckable="True" />
+                    </ContextMenu>
+                </Button.ContextMenu>
+
+                <Path Data="{StaticResource IconCheckerboard}" Style="{StaticResource FluentIcon}" />
+            </Button>
+
+            <Button
+                Margin="2,0,0,0"
+                AutomationProperties.Name="取消当前操作"
+                Command="{Binding CancelCommand}"
+                Style="{StaticResource ToolBarButtonStyle}"
+                ToolTip="取消当前操作"
+                Visibility="{Binding IsProcessing, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Path Data="{StaticResource IconDismiss}" Style="{StaticResource FluentIcon}" />
+            </Button>
+            <Border
+                Width="1"
+                Height="22"
+                Margin="10,0"
+                Background="{DynamicResource DividerStrokeColorDefaultBrush}"
+                Visibility="{Binding IsProcessing, Converter={StaticResource BooleanToVisibilityConverter}}" />
+            <Button
+                Margin="2,0,0,0"
+                AutomationProperties.Name="{Binding ThemeToggleToolTip}"
+                Command="{Binding ChangeThemeCommand}"
+                Style="{StaticResource ToolBarButtonStyle}"
+                ToolTip="{Binding ThemeToggleToolTip}">
+                <!--
+                    图标表示「点下去会切到哪」：浅色时显示月亮，深色时显示太阳。
+                    默认值必须写在 Setter 里——写在 Path 上的局部值优先级高于触发器，触发器改不动它
+                -->
+                <Path>
+                    <Path.Style>
+                        <Style BasedOn="{StaticResource FluentIcon}" TargetType="Path">
+                            <Setter Property="Data" Value="{StaticResource IconMoon}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsDarkTheme}" Value="True">
+                                    <Setter Property="Data" Value="{StaticResource IconSun}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Path.Style>
+                </Path>
+            </Button>
+            <Button
+                Margin="2,0,0,0"
+                AutomationProperties.Name="关于"
+                Command="{Binding OpenAboutCommand}"
+                Style="{StaticResource ToolBarButtonStyle}"
+                ToolTip="关于">
+                <Path Data="{StaticResource IconInfo}" Style="{StaticResource FluentIcon}" />
+            </Button>
+        </StackPanel>
+
+        <StackPanel
+            x:Name="FallbackCaptionButtons"
+            Grid.Row="0"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Top"
+            Orientation="Horizontal"
+            WindowChrome.IsHitTestVisibleInChrome="True">
+            <StackPanel.Style>
+                <Style TargetType="StackPanel">
+                    <Style.Triggers>
+                        <DataTrigger
+                            Binding="{Binding Background, RelativeSource={RelativeSource AncestorType=Window}}"
+                            Value="{x:Static Brushes.Transparent}">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </StackPanel.Style>
+            <Button
+                AutomationProperties.Name="最小化"
+                Click="OnMinimizeClick"
+                Style="{StaticResource CaptionButtonStyle}"
+                ToolTip="最小化">
+                <Path Width="10" HorizontalAlignment="Center" VerticalAlignment="Center"
+                      Data="M0,0 H10" Stroke="{DynamicResource TextFillColorPrimaryBrush}" />
+            </Button>
+            <Button Click="OnMaximizeOrRestoreClick" AutomationProperties.Name="{Binding ToolTip, RelativeSource={RelativeSource Self}}">
+                <Button.Style>
+                    <Style BasedOn="{StaticResource CaptionButtonStyle}" TargetType="Button">
+                        <Setter Property="ToolTip" Value="最大化" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
+                                <Setter Property="ToolTip" Value="还原" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+                <Path Width="11" Height="11" Stretch="Uniform" Stroke="{DynamicResource TextFillColorPrimaryBrush}">
+                    <Path.Style>
+                        <Style TargetType="Path">
+                            <Setter Property="Data" Value="M0,0 H10 V10 H0 Z" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
+                                    <Setter Property="Data" Value="M3,3 V0 H10 V7 H7 M0,3 H7 V10 H0 Z" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Path.Style>
+                </Path>
+            </Button>
+            <Button
+                AutomationProperties.Name="关闭"
+                Click="OnCloseClick"
+                Style="{StaticResource CaptionButtonStyle}"
+                ToolTip="关闭">
+                <Path Width="11" Height="11" Stretch="Uniform" Data="M0,0 L10,10 M10,0 L0,10"
+                      Stroke="{DynamicResource TextFillColorPrimaryBrush}" />
+            </Button>
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <!--  固定参数面板宽度，将窗口增加的宽度留给预览区。  -->
+                <ColumnDefinition Width="300" />
+            </Grid.ColumnDefinitions>
+
+            <views:ImagePreviewPanel Grid.Column="0" Margin="0,0,15,0" />
+            <views:ImageSettingsPanel Grid.Column="1" />
+        </Grid>
+
+    </Grid>
+</Window>

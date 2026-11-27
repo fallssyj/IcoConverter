@@ -1,0 +1,462 @@
+<Window
+    x:Class="IcoConverter.ExecutableIconPickerWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:controls="clr-namespace:IcoConverter.Controls"
+    xmlns:viewModels="clr-namespace:IcoConverter.ViewModels"
+    Title="图标提取器"
+    Width="1160"
+    Height="836"
+    MinWidth="940"
+    MinHeight="640"
+    WindowStartupLocation="CenterOwner"
+    mc:Ignorable="d">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+
+        <!--  放大预览背景铺棋盘格：图标通常带透明边缘，白底下难以分辨边界  -->
+        <DrawingBrush
+            x:Key="PreviewCheckerBrush"
+            Stretch="None"
+            TileMode="Tile"
+            Viewbox="0 0 10 10"
+            ViewboxUnits="Absolute"
+            Viewport="0,0,10,10"
+            ViewportUnits="Absolute">
+            <DrawingBrush.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="#FFFFFFFF" Geometry="M0,0 H10 V10 H0 Z" />
+                    <GeometryDrawing Brush="#FFE6E6E6" Geometry="M0,0 H5 V5 H0 Z M5,5 H10 V10 H5 Z" />
+                </DrawingGroup>
+            </DrawingBrush.Drawing>
+        </DrawingBrush>
+
+        <DrawingBrush
+            x:Key="DarkPreviewCheckerBrush"
+            Stretch="None"
+            TileMode="Tile"
+            Viewbox="0 0 10 10"
+            ViewboxUnits="Absolute"
+            Viewport="0,0,10,10"
+            ViewportUnits="Absolute">
+            <DrawingBrush.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="#FF333333" Geometry="M0,0 H10 V10 H0 Z" />
+                    <GeometryDrawing Brush="#FF242424" Geometry="M0,0 H5 V5 H0 Z M5,5 H10 V10 H5 Z" />
+                </DrawingGroup>
+            </DrawingBrush.Drawing>
+        </DrawingBrush>
+
+        <!--  列表仅负责排布，选中态由内部格子绘制，避免 ListBoxItem 再叠加一层蓝底  -->
+        <Style x:Key="IconTileContainerStyle" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <ContentPresenter />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="IconTileStyle" TargetType="ToggleButton">
+            <Setter Property="Width" Value="108" />
+            <Setter Property="Height" Value="104" />
+            <Setter Property="Margin" Value="3" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Grid>
+                            <Border
+                                x:Name="Surface"
+                                Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                BorderBrush="{DynamicResource ControlStrokeColorSecondaryBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8" />
+
+                            <!-- 使用半透明选中背景，减少对图标可辨识度的影响。 -->
+                            <Border
+                                x:Name="Tint"
+                                Background="{DynamicResource AccentFillColorDefaultBrush}"
+                                CornerRadius="8"
+                                IsHitTestVisible="False"
+                                Opacity="0" />
+
+                            <ContentPresenter
+                                Margin="6,9,6,7"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+
+                            <Border
+                                x:Name="CheckBadge"
+                                Width="16"
+                                Height="16"
+                                Margin="0,6,6,0"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top"
+                                Background="{DynamicResource AccentFillColorDefaultBrush}"
+                                CornerRadius="8"
+                                Visibility="Collapsed">
+                                <Path
+                                    Width="10"
+                                    Height="10"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Data="M5,8.2 L7.2,10.4 L11.2,5.8"
+                                    Stretch="Uniform"
+                                    Stroke="White"
+                                    StrokeEndLineCap="Round"
+                                    StrokeLineJoin="Round"
+                                    StrokeStartLineCap="Round"
+                                    StrokeThickness="1.6" />
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Surface" Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
+                                <Setter TargetName="Tint" Property="Opacity" Value="0.06" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Tint" Property="Opacity" Value="0.15" />
+                                <Setter TargetName="CheckBadge" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsChecked" Value="True" />
+                                    <Condition Property="IsMouseOver" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Tint" Property="Opacity" Value="0.22" />
+                            </MultiTrigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="1" Margin="16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Margin="0,0,0,14">
+                <TextBlock FontSize="20" Text="扫描并导出可执行文件中的图标" />
+                <TextBlock Margin="0,4,0,0" Text="选择要导出的图标组合，批量保存为 ICO 文件。" />
+            </StackPanel>
+
+            <Border
+                Grid.Row="1"
+                Padding="16"
+                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Margin="0,0,24,0">
+                        <TextBlock Opacity="0.6" Text="当前文件" />
+                        <TextBlock
+                            Margin="0,4,0,0"
+                            FontSize="15"
+                            Text="{Binding BinaryFileName}"
+                            TextTrimming="CharacterEllipsis" />
+                        <TextBlock
+                            Margin="0,10,0,0"
+                            Opacity="0.6"
+                            Text="输出目录" />
+                        <Grid Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox
+                                Grid.Column="0"
+                                Height="34"
+                                VerticalContentAlignment="Center"
+                                Text="{Binding OutputDirectory, UpdateSourceTrigger=PropertyChanged}" />
+                            <Button
+                                Grid.Column="1"
+                                Width="86"
+                                Height="34"
+                                Margin="8,0,0,0"
+                                Command="{Binding BrowseOutputCommand}"
+                                Content="浏览" />
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel
+                        Grid.Column="1"
+                        MinWidth="264"
+                        VerticalAlignment="Stretch">
+                        <TextBlock Opacity="0.6" Text="状态" />
+                        <TextBlock
+                            Margin="0,4,0,0"
+                            FontSize="15"
+                            Text="{Binding StatusMessage}" />
+                        <Separator Margin="0,16" />
+                        <StackPanel HorizontalAlignment="Left" Orientation="Horizontal">
+                            <Button
+                                Height="32"
+                                Padding="14,0"
+                                Command="{Binding RefreshCommand}"
+                                Content="重新扫描" />
+                            <Button
+                                Height="32"
+                                Margin="8,0,0,0"
+                                Padding="14,0"
+                                Command="{Binding SelectAllCommand}"
+                                Content="全选" />
+                            <Button
+                                Height="32"
+                                Margin="8,0,0,0"
+                                Padding="14,0"
+                                Command="{Binding ClearAllCommand}"
+                                Content="清空" />
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="2" Margin="0,12,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="252" />
+                </Grid.ColumnDefinitions>
+
+                <Border
+                    Grid.Column="0"
+                    Padding="8"
+                    Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                    <ListBox
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        HorizontalContentAlignment="Stretch"
+                        ItemContainerStyle="{StaticResource IconTileContainerStyle}"
+                        ItemsSource="{Binding IconOptions}"
+                        MouseLeave="OnIconListMouseLeave"
+                        ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                        ScrollViewer.VerticalScrollBarVisibility="Auto">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <!--  顶部对齐：行高由内容决定，否则 Arrange 会被撑到视口高度  -->
+                                <controls:AdaptiveUniformGrid MinColumnWidth="114" VerticalAlignment="Top">
+                                    <controls:AdaptiveUniformGrid.Style>
+                                        <Style TargetType="controls:AdaptiveUniformGrid">
+                                            <Style.Triggers>
+                                                <!--  主题的竖向滚动条是覆盖式绘制，轨道会盖住最后一列；
+                                                      出现时按条宽（约 15）让位，末列才不会缺一块  -->
+                                                <DataTrigger
+                                                    Binding="{Binding ComputedVerticalScrollBarVisibility, RelativeSource={RelativeSource AncestorType=ScrollViewer}}"
+                                                    Value="Visible">
+                                                    <Setter Property="Margin" Value="0,0,16,0" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </controls:AdaptiveUniformGrid.Style>
+                                </controls:AdaptiveUniformGrid>
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type viewModels:ExecutableIconOption}">
+                                <ToggleButton
+                                    Click="OnIconTileClick"
+                                    IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                    MouseEnter="OnIconTileMouseEnter"
+                                    Style="{StaticResource IconTileStyle}"
+                                    ToolTip="{Binding Details}">
+                                    <StackPanel>
+                                        <Image
+                                            Width="48"
+                                            Height="48"
+                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                            Source="{Binding Preview}"
+                                            Stretch="Uniform" />
+                                        <TextBlock
+                                            Margin="0,8,0,0"
+                                            HorizontalAlignment="Center"
+                                            FontSize="12"
+                                            Text="{Binding DisplayName}"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <TextBlock
+                                            Margin="0,2,0,0"
+                                            HorizontalAlignment="Center"
+                                            FontSize="11"
+                                            Opacity="0.6"
+                                            Text="{Binding PrimarySizeLabel}" />
+                                    </StackPanel>
+                                </ToggleButton>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Border>
+
+                <!-- 使用最近邻放大当前项的预览，便于检查像素边缘。 -->
+                <Border
+                    Grid.Column="1"
+                    Margin="12,0,0,0"
+                    Padding="14"
+                    Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Visibility="{Binding HasPreviewOption, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock
+                            FontSize="12"
+                            Opacity="0.6"
+                            Text="预览" />
+
+                        <Border
+                            Grid.Row="1"
+                            MinHeight="120"
+                            Margin="0,10"
+                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="{StaticResource PreviewCheckerBrush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsDarkTheme}" Value="True">
+                                            <Setter Property="Background" Value="{StaticResource DarkPreviewCheckerBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <Image
+                                Margin="8"
+                                RenderOptions.BitmapScalingMode="NearestNeighbor"
+                                Source="{Binding PreviewOption.Preview}"
+                                Stretch="Uniform" />
+                        </Border>
+
+                        <StackPanel Grid.Row="2">
+                            <TextBlock
+                                FontSize="14"
+                                Text="{Binding PreviewOption.Title}"
+                                TextTrimming="CharacterEllipsis" />
+                            <TextBlock
+                                Margin="0,2,0,0"
+                                FontSize="12"
+                                Opacity="0.6"
+                                Text="{Binding PreviewOption.FrameSummary}" />
+                        </StackPanel>
+
+                        <Border Grid.Row="3" Margin="0,10,0,0">
+                            <ScrollViewer MaxHeight="150" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding PreviewOption.FrameLines}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock
+                                                Margin="0,0,0,2"
+                                                FontSize="11"
+                                                Opacity="0.7"
+                                                Text="{Binding}" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <StackPanel
+                    Grid.ColumnSpan="2"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Visibility="{Binding IsEmptyStateVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        FontSize="18"
+                        Text="未找到图标" />
+                    <TextBlock
+                        Margin="0,6,0,0"
+                        HorizontalAlignment="Center"
+                        Text="该可执行文件未包含可导出的 ICO 资源。" />
+                </StackPanel>
+
+                <Border
+                    Grid.ColumnSpan="2"
+                    CornerRadius="8"
+                    Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <ProgressBar Width="120" IsIndeterminate="True" />
+                        <TextBlock
+                            Margin="0,10,0,0"
+                            HorizontalAlignment="Center"
+                            Text="正在扫描..." />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid Grid.Row="3" Margin="0,16,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    Opacity="0.6"
+                    Text="导出路径默认为桌面\文件名-output，可手动调整。" />
+                <TextBlock
+                    Grid.Column="1"
+                    Margin="0,0,16,0"
+                    VerticalAlignment="Center"
+                    Opacity="0.6"
+                    Text="{Binding SelectionSummary}" />
+                <Button
+                    Grid.Column="2"
+                    Width="120"
+                    Height="38"
+                    Margin="0,0,10,0"
+                    Command="{Binding ExportCommand}"
+                    Content="导出所选"
+                    Style="{StaticResource AccentButtonStyle}" />
+                <Button
+                    Grid.Column="3"
+                    Width="90"
+                    Height="38"
+                    Command="{Binding CloseCommand}"
+                    Content="关闭" />
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

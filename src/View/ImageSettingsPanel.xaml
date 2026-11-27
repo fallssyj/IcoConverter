@@ -1,0 +1,394 @@
+<UserControl
+    x:Class="IcoConverter.View.ImageSettingsPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="clr-namespace:IcoConverter.Controls"
+    xmlns:models="clr-namespace:IcoConverter.Models">
+    <Border
+        Padding="16,14,12,14"
+        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+        BorderThickness="1"
+        CornerRadius="12">
+        <ScrollViewer
+            Padding="0,0,10,0"
+            HorizontalScrollBarVisibility="Disabled"
+            VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="0,0,12,0">
+                <Grid Margin="0,0,0,16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
+                        <Path Data="{StaticResource IconOptions}" Style="{StaticResource FluentIcon}" />
+                        <TextBlock
+                            Margin="8,0,0,0"
+                            VerticalAlignment="Center"
+                            FontSize="14"
+                            Text="蒙版参数" />
+                    </StackPanel>
+
+                    <Button
+                        Grid.Column="1"
+                        Width="60"
+                        VerticalAlignment="Center"
+                        Command="{Binding ResetMaskCommand}"
+                        Content="重置"
+                        Style="{StaticResource PanelLinkButtonStyle}"
+                        ToolTip="恢复默认蒙版参数" />
+                </Grid>
+
+                <TextBlock Style="{StaticResource GroupTitleStyle}" Text="形状与圆角" />
+                <Border
+                    Padding="2"
+                    Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                    CornerRadius="8">
+                    <UniformGrid Columns="2">
+                        <Button
+                            Command="{Binding SelectMaskShapeCommand}"
+                            CommandParameter="{x:Static models:MaskShape.RoundedRectangle}"
+                            Content="圆角矩形"
+                            Style="{StaticResource RoundedShapeSegmentStyle}" />
+                        <Button
+                            Command="{Binding SelectMaskShapeCommand}"
+                            CommandParameter="{x:Static models:MaskShape.Circle}"
+                            Content="圆形"
+                            Style="{StaticResource CircleShapeSegmentStyle}" />
+                    </UniformGrid>
+                </Border>
+
+                <StackPanel Visibility="{Binding IsRoundedMaskSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <!--  将单位切换放在标签行，给滑块与数值输入预留横向空间。  -->
+                    <Grid Margin="0,14,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            Style="{StaticResource FieldLabelStyle}"
+                            Text="圆角半径" />
+
+                        <ComboBox
+                            Grid.Column="1"
+                            MinWidth="104"
+                            Margin="8,0,0,0"
+                            HorizontalAlignment="Right"
+                            ItemsSource="{Binding RadiusUnitOptions}"
+                            SelectedItem="{Binding CornerRadiusUnit}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Converter={StaticResource RadiusUnitConverter}}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </Grid>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <Slider
+                            Grid.Column="0"
+                            Margin="0,0,4,0"
+                            VerticalAlignment="Center"
+                            IsSnapToTickEnabled="True"
+                            Maximum="{Binding CornerRadiusMaximum}"
+                            Minimum="0"
+                            TickFrequency="{Binding CornerRadiusTickFrequency}"
+                            Value="{Binding CornerRadius, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <controls:IntegerInput
+                            Grid.Column="1"
+                            MinWidth="76"
+                            Margin="6,0,0,0"
+                            VerticalAlignment="Center"
+                            Maximum="{Binding CornerRadiusMaximum}"
+                            Minimum="0"
+                            SmallChange="{Binding CornerRadiusTickFrequency}"
+                            Value="{Binding CornerRadius, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    </Grid>
+
+                    <TextBlock
+                        Margin="0,6,0,0"
+                        Style="{StaticResource FieldCaptionStyle}"
+                        Text="{Binding CornerRadiusHint}"
+                        Visibility="{Binding IsCornerRadiusHintVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                    <ItemsControl Margin="0,10,-6,0" ItemsSource="{Binding RadiusPresets}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Columns="5" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button
+                                    Command="{Binding DataContext.ApplyRadiusPresetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    CommandParameter="{Binding Value}"
+                                    Content="{Binding Label}"
+                                    Style="{StaticResource PresetButtonStyle}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <StackPanel Margin="0,14,0,0" Visibility="{Binding IsCircleMaskSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <TextBlock Style="{StaticResource FieldLabelStyle}" Text="圆形拟合模式" />
+                    <ComboBox
+                        Margin="0,0,0,12"
+                        HorizontalAlignment="Stretch"
+                        ItemsSource="{Binding CircleFitModeOptions}"
+                        SelectedItem="{Binding CircleFitMode}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Converter={StaticResource CircleFitModeConverter}}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+
+                    <TextBlock
+                        Margin="0,-6,0,12"
+                        Style="{StaticResource FieldCaptionStyle}"
+                        Text="{Binding CircleFitHint}"
+                        Visibility="{Binding IsCircleFitHintVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                    <TextBlock
+                        Style="{StaticResource FieldLabelStyle}"
+                        Text="留白百分比"
+                        Visibility="{Binding IsCirclePaddingVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                    <Grid Visibility="{Binding IsCirclePaddingVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <Slider
+                            Grid.Column="0"
+                            Margin="0,0,4,0"
+                            VerticalAlignment="Center"
+                            IsSnapToTickEnabled="True"
+                            Maximum="45"
+                            Minimum="0"
+                            TickFrequency="1"
+                            Value="{Binding CirclePaddingPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <controls:IntegerInput
+                            Grid.Column="1"
+                            MinWidth="76"
+                            Margin="6,0,0,0"
+                            VerticalAlignment="Center"
+                            Maximum="45"
+                            Minimum="0"
+                            SmallChange="1"
+                            Value="{Binding CirclePaddingPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    </Grid>
+                </StackPanel>
+
+                <TextBlock
+                    Margin="0,18,0,8"
+                    Style="{StaticResource GroupTitleStyle}"
+                    Text="画布" />
+
+                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="画布扩展（每边像素）" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Slider
+                        Grid.Column="0"
+                        Margin="0,0,4,0"
+                        VerticalAlignment="Center"
+                        IsSnapToTickEnabled="True"
+                        Maximum="1024"
+                        Minimum="-1024"
+                        TickFrequency="1"
+                        Value="{Binding ExpandCanvasSliderValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                    <controls:IntegerInput
+                        Grid.Column="1"
+                        MinWidth="76"
+                        Margin="6,0,0,0"
+                        VerticalAlignment="Center"
+                        Maximum="4096"
+                        Minimum="-4096"
+                        SmallChange="1"
+                        Value="{Binding ExpandCanvasPixels, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </Grid>
+
+                <TextBlock
+                    Margin="0,6,0,0"
+                    Style="{StaticResource FieldCaptionStyle}"
+                    Text="正数向外扩，负数向内收。" />
+
+                <TextBlock
+                    Margin="0,4,0,0"
+                    FontSize="12"
+                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                    Text="{Binding OutputSizeText}"
+                    Visibility="{Binding IsOutputSizeVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                <TextBlock
+                    Margin="0,14,0,6"
+                    Style="{StaticResource FieldLabelStyle}"
+                    Text="画布底色" />
+                <ComboBox
+                    HorizontalAlignment="Stretch"
+                    ItemsSource="{Binding CanvasFillModeOptions}"
+                    SelectedItem="{Binding CanvasFillMode}">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Converter={StaticResource CanvasFillModeConverter}}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+
+                <Grid Margin="0,8,0,0" Visibility="{Binding IsCanvasCustomColorVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Button
+                        Height="32"
+                        Padding="10,0"
+                        VerticalAlignment="Center"
+                        Command="{Binding PickCanvasCustomColorCommand}">
+                        <Button.Content>
+                            <StackPanel Orientation="Horizontal">
+                                <Border
+                                    Width="16"
+                                    Height="16"
+                                    VerticalAlignment="Center"
+                                    Background="{Binding CanvasCustomColorPreviewBrush}"
+                                    BorderBrush="{DynamicResource ControlStrokeColorSecondaryBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4" />
+                                <TextBlock
+                                    Margin="8,0,0,0"
+                                    VerticalAlignment="Center"
+                                    Text="选择颜色" />
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+
+                    <TextBlock
+                        Grid.Column="1"
+                        Margin="10,0,0,0"
+                        VerticalAlignment="Center"
+                        Style="{StaticResource FieldCaptionStyle}"
+                        Text="{Binding CanvasCustomColorHex}" />
+                </Grid>
+
+                <CheckBox
+                    Margin="0,10,0,0"
+                    IsChecked="{Binding FillCanvasOutsideMask}"
+                    Visibility="{Binding IsCanvasFillColorChosen, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <TextBlock Text="底色铺满整张画布（含蒙版外）" TextWrapping="Wrap" />
+                </CheckBox>
+
+                <TextBlock
+                    Margin="0,18,0,6"
+                    Style="{StaticResource FieldLabelStyle}"
+                    Text="主体对齐" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="13"
+                        Opacity="0.9"
+                        Text="留白" />
+                    <StackPanel
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Orientation="Horizontal">
+                        <controls:IntegerInput
+                            MinWidth="76"
+                            Maximum="45"
+                            Minimum="0"
+                            SmallChange="1"
+                            Value="{Binding TrimPaddingPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock
+                            Margin="6,0,0,0"
+                            VerticalAlignment="Center"
+                            Style="{StaticResource FieldCaptionStyle}"
+                            Text="%" />
+                    </StackPanel>
+                </Grid>
+
+                <Grid Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Button
+                        Grid.Column="0"
+                        Margin="0,0,4,0"
+                        Command="{Binding AutoFitContentCommand}"
+                        Content="裁掉空白"
+                        Style="{StaticResource PresetButtonStyle}"
+                        ToolTip="按四周空白裁到主体，再按上面的留白百分比补边" />
+                    <Button
+                        Grid.Column="1"
+                        Margin="4,0,0,0"
+                        Command="{Binding ClearSourceOverrideCommand}"
+                        Content="还原"
+                        Style="{StaticResource PresetButtonStyle}"
+                        ToolTip="回到对齐前的图" />
+                </Grid>
+
+                <TextBlock
+                    Margin="0,6,0,0"
+                    Style="{StaticResource FieldCaptionStyle}"
+                    Text="{Binding SourceOverrideHint}"
+                    Visibility="{Binding HasSourceOverride, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                <TextBlock
+                    Margin="0,18,0,8"
+                    Style="{StaticResource GroupTitleStyle}"
+                    Text="预览与输出" />
+
+                <CheckBox IsChecked="{Binding ShowMaskGuides}">
+                    <TextBlock Text="显示蒙版引导线" TextWrapping="Wrap" />
+                </CheckBox>
+
+                <TextBlock
+                    Margin="0,14,0,6"
+                    Style="{StaticResource FieldLabelStyle}"
+                    Text="边缘优化（2x 超采样）" />
+                <ComboBox
+                    HorizontalAlignment="Stretch"
+                    ItemsSource="{Binding SupersampleModeOptions}"
+                    SelectedItem="{Binding SupersampleMode}">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Converter={StaticResource SupersampleModeConverter}}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+
+                <TextBlock
+                    Margin="0,6,0,0"
+                    Style="{StaticResource FieldCaptionStyle}"
+                    Text="{Binding ExportSupersampleHint}"
+                    TextWrapping="Wrap"
+                    Visibility="{Binding IsExportSupersampleHintVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+            </StackPanel>
+
+        </ScrollViewer>
+
+    </Border>
+</UserControl>

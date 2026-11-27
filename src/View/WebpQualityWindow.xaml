@@ -1,0 +1,184 @@
+<Window
+    x:Class="IcoConverter.WebpQualityWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="clr-namespace:IcoConverter.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:utils="clr-namespace:IcoConverter.Utils"
+    Title="WebP 导出设置"
+    Width="440"
+    Height="416"
+    MinWidth="440"
+    MinHeight="416"
+    utils:DialogWindowBehavior.DialogResult="{Binding DialogResult}"
+    ResizeMode="CanMinimize"
+    ShowInTaskbar="False"
+    WindowStartupLocation="CenterOwner"
+    mc:Ignorable="d">
+    <Window.Resources>
+        <!-- 整张卡片可点击，选中时使用强调色描边。 -->
+        <Style x:Key="QualityOptionStyle" TargetType="RadioButton">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border
+                            x:Name="Card"
+                            Padding="12,10"
+                            Background="{DynamicResource ControlFillColorDefaultBrush}"
+                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <Grid
+                                    Width="18"
+                                    Height="18"
+                                    Margin="0,3,0,0"
+                                    VerticalAlignment="Top">
+                                    <Ellipse
+                                        x:Name="Ring"
+                                        Fill="Transparent"
+                                        Stroke="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        StrokeThickness="1.5" />
+                                    <Ellipse
+                                        x:Name="Dot"
+                                        Width="8"
+                                        Height="8"
+                                        Fill="{DynamicResource AccentFillColorDefaultBrush}"
+                                        Visibility="Collapsed" />
+                                </Grid>
+
+                                <ContentPresenter
+                                    Grid.Column="1"
+                                    Margin="10,0,0,0"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Card" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                <Setter TargetName="Dot" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="1" Margin="16,14,16,16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0">
+                <TextBlock FontSize="16" Text="{Binding HeaderText}" />
+                <TextBlock
+                    Margin="0,6,0,0"
+                    FontSize="12"
+                    Opacity="0.72"
+                    Text="{Binding IntroductionText}"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+
+            <StackPanel Grid.Row="1" Margin="0,16,0,0">
+                <RadioButton
+                    GroupName="WebpCompression"
+                    IsChecked="{Binding IsLossy, Mode=TwoWay}"
+                    Style="{StaticResource QualityOptionStyle}">
+                    <StackPanel>
+                        <TextBlock FontSize="14" Text="有损压缩" />
+                        <TextBlock
+                            Margin="0,2,0,0"
+                            FontSize="12"
+                            Opacity="0.62"
+                            Text="文件通常更小，可调整压缩质量" />
+                    </StackPanel>
+                </RadioButton>
+
+                <RadioButton
+                    Margin="0,8,0,0"
+                    GroupName="WebpCompression"
+                    IsChecked="{Binding IsLossless, Mode=TwoWay}"
+                    Style="{StaticResource QualityOptionStyle}">
+                    <StackPanel>
+                        <TextBlock FontSize="14" Text="无损压缩" />
+                        <TextBlock
+                            Margin="0,2,0,0"
+                            FontSize="12"
+                            Opacity="0.62"
+                            Text="保留处理后图像的像素" />
+                    </StackPanel>
+                </RadioButton>
+            </StackPanel>
+
+            <StackPanel Grid.Row="2" Margin="0,18,0,0">
+                <TextBlock FontSize="13" Opacity="0.9" Text="质量" />
+                <Grid Margin="0,6,0,0" IsEnabled="{Binding IsLossy}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="104" />
+                    </Grid.ColumnDefinitions>
+                    <Slider
+                        VerticalAlignment="Center"
+                        Maximum="100"
+                        Minimum="0"
+                        TickFrequency="1"
+                        Value="{Binding Quality, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    <controls:IntegerInput
+                        Grid.Column="1"
+                        Margin="10,0,0,0"
+                        Maximum="100"
+                        Minimum="0"
+                        SmallChange="1"
+                        Value="{Binding Quality, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </Grid>
+                <TextBlock
+                    Margin="0,8,0,0"
+                    FontSize="12"
+                    Opacity="0.6"
+                    Text="{Binding QualityHint}"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+
+            <StackPanel
+                Grid.Row="3"
+                Margin="0,14,0,0"
+                HorizontalAlignment="Right"
+                Orientation="Horizontal">
+                <Button
+                    Width="90"
+                    Height="32"
+                    Margin="0,0,8,0"
+                    Command="{Binding CancelCommand}"
+                    Content="取消" />
+                <Button
+                    Width="90"
+                    Height="32"
+                    Command="{Binding ConfirmCommand}"
+                    Content="导出"
+                    Style="{StaticResource AccentButtonStyle}" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
