@@ -1,0 +1,113 @@
+name: Build and Release for Windows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Package Windows x64 and x86
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        id: dotnet
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build release packages
+        id: package
+        shell: pwsh
+        env:
+          DOTNET_SDK_VERSION: ${{ steps.dotnet.outputs.dotnet-version }}
+        run: |
+          if (-not (Test-Path -LiteralPath 'global.json')) {
+            @{ sdk = @{ version = $env:DOTNET_SDK_VERSION; rollForward = 'disable' } } |
+              ConvertTo-Json | Set-Content -LiteralPath 'global.json' -Encoding utf8
+          }
+
+          ./build.ps1
+
+          [xml]$versionProps = Get-Content -LiteralPath 'src/version.props' -Raw
+          $version = [string]$versionProps.Project.PropertyGroup.Version
+          if ($version -notmatch '\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z') {
+            throw "Invalid release version '$version'. Expected a version in major.minor.patch format."
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-release-packages
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+          path: |
+            src/bin/Release/publish/IcoConverter-win-x64.zip
+            src/bin/Release/publish/IcoConverter-win-x86.zip
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-release-packages
+          path: dist
+
+      - name: Create the version tag and publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          packages=(dist/IcoConverter-win-x64.zip dist/IcoConverter-win-x86.zip)
+          for package in "${packages[@]}"; do
+            if [[ ! -s "$package" ]]; then
+              echo "::error::Missing or empty release package $package"
+              exit 1
+            fi
+          done
+
+          release_draft=$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$RELEASE_VERSION\") | .draft")
+          if [[ "$release_draft" == "false" ]]; then
+            echo "::error::Version $RELEASE_VERSION has already been released. Update src/version before running this workflow again."
+            exit 1
+          fi
+
+          tag_ref="refs/tags/$RELEASE_VERSION"
+          tag_sha=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$RELEASE_VERSION" \
+            --jq ".[] | select(.ref == \"$tag_ref\") | .object.sha")
+          if [[ -z "$tag_sha" && -z "$release_draft" ]]; then
+            gh api --method POST "repos/$GH_REPO/git/refs" \
+              -f "ref=$tag_ref" -f "sha=$GITHUB_SHA" --silent
+          elif [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::Tag $RELEASE_VERSION does not point to the commit used for this build."
+            exit 1
+          fi
+
+          if [[ -z "$release_draft" ]]; then
+            gh release create "$RELEASE_VERSION" --verify-tag --draft \
+              --title "IcoConverter $RELEASE_VERSION" --generate-notes
+          fi
+
+          gh release upload "$RELEASE_VERSION" "${packages[@]}" --clobber
+          gh release edit "$RELEASE_VERSION" --draft=false --latest
